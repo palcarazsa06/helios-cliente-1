@@ -1,0 +1,11 @@
+streamlit
+gspread
+oauth2client
+pandas
+python-dotenv
+langchain-google-genai
+langchain-community
+duckduckgo-search
+playwright
+PyPDF2
+requests
