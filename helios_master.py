@@ -35,6 +35,9 @@ load_dotenv()
 llm_flash = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 llm_creativo = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.5)
 
+# 💡 FIX 1: Faltaba definir los permisos (scope) que necesita Google
+scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+
 # --- NUEVA CONEXIÓN PARA LA NUBE ---
 def conectar_google_sheets_nube():
     # Intentamos leer las credenciales desde los Secrets de Streamlit
@@ -45,6 +48,10 @@ def conectar_google_sheets_nube():
     return gspread.authorize(creds)
 
 log_web("1. ☁️ Conectando a la base de datos en la nube...")
+
+# 💡 FIX 2: Inicializamos 'sheet' vacía para que no dé NameError si la conexión falla
+sheet = None 
+
 try:
     # Intenta primero el modo nube, si falla (porque estás en local), usa el archivo
     if "gcp_service_account" in st.secrets:
@@ -58,9 +65,11 @@ try:
 except Exception as e:
     log_web(f"❌ Error crítico de conexión: {e}")
 
-cabeceras = ["Nombre", "Web", "Cualificado", "Resumen", "Asunto", "Cuerpo", "Enviado", "Email Contacto", "Prompt Imagen", "Mensaje LinkedIn", "URL LinkedIn"]
-if not sheet.row_values(1):
-    sheet.append_row(cabeceras)
+# 💡 FIX 3: Solo intentamos poner cabeceras si la conexión fue exitosa
+if sheet:
+    cabeceras = ["Nombre", "Web", "Cualificado", "Resumen", "Asunto", "Cuerpo", "Enviado", "Email Contacto", "Prompt Imagen", "Mensaje LinkedIn", "URL LinkedIn"]
+    if not sheet.row_values(1):
+        sheet.append_row(cabeceras)
 
 # ==========================================
 # 🕵️ FASE 1: RECOLECCIÓN
