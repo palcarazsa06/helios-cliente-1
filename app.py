@@ -16,10 +16,22 @@ st.set_page_config(page_title="Helios OS", page_icon="☀️", layout="wide")
 def conectar_bd():
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-        creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
+        
+        # 💡 FIX: Inteligencia de la nube. Si detecta Secrets, los usa. Si no, usa el archivo local.
+        if "gcp_service_account" in st.secrets:
+            # st.secrets devuelve una estructura especial, la convertimos a diccionario normal
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        else:
+            creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
+            
         cliente = gspread.authorize(creds)
-        spreadsheet_id = os.getenv("SPREADSHEET_ID")
+        
+        # Pillamos el ID del excel desde los Secrets (o desde el .env si estás en tu PC)
+        spreadsheet_id = st.secrets.get("SPREADSHEET_ID", os.getenv("SPREADSHEET_ID"))
+        
         return cliente.open_by_key(spreadsheet_id).sheet1
+        
     except Exception as e:
         st.error(f"Error de conexión: {e}")
         return None
