@@ -7,6 +7,7 @@ import PyPDF2
 import gspread
 import re
 import random
+import streamlit as st
 from urllib.parse import urljoin, urlparse
 from email.message import EmailMessage
 from dotenv import load_dotenv
@@ -16,7 +17,6 @@ from langchain_core.messages import HumanMessage
 from playwright.sync_api import sync_playwright
 from concurrent.futures import ThreadPoolExecutor
 
-import os
 os.system("playwright install chromium")
 
 # ==========================================
@@ -35,11 +35,28 @@ load_dotenv()
 llm_flash = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 llm_creativo = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.5)
 
+# --- NUEVA CONEXIÓN PARA LA NUBE ---
+def conectar_google_sheets_nube():
+    # Intentamos leer las credenciales desde los Secrets de Streamlit
+    creds_dict = st.secrets["gcp_service_account"]
+    
+    # Creamos las credenciales directamente desde el diccionario (sin archivo .json)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    return gspread.authorize(creds)
+
 log_web("1. ☁️ Conectando a la base de datos en la nube...")
-scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-creds = ServiceAccountCredentials.from_json_keyfile_name('credenciales.json', scope)
-cliente = gspread.authorize(creds)
-sheet = cliente.open_by_key("1w6ug2YFj1wpMFNwCgS2sqewUmG_4m9RIMe2x2w3Bkm4").sheet1
+try:
+    # Intenta primero el modo nube, si falla (porque estás en local), usa el archivo
+    if "gcp_service_account" in st.secrets:
+        cliente = conectar_google_sheets_nube()
+    else:
+        # Tu código antiguo para cuando trabajes en tu ordenador
+        creds = ServiceAccountCredentials.from_json_keyfile_name('credenciales.json', scope)
+        cliente = gspread.authorize(creds)
+        
+    sheet = cliente.open_by_key("1w6ug2YFj1wpMFNwCgS2sqewUmG_4m9RIMe2x2w3Bkm4").sheet1
+except Exception as e:
+    log_web(f"❌ Error crítico de conexión: {e}")
 
 cabeceras = ["Nombre", "Web", "Cualificado", "Resumen", "Asunto", "Cuerpo", "Enviado", "Email Contacto", "Prompt Imagen", "Mensaje LinkedIn", "URL LinkedIn"]
 if not sheet.row_values(1):
