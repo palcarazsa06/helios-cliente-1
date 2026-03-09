@@ -74,7 +74,7 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (GOOGLE SEARCH DIRECTO)
+# 🕵️ FASE 1: RECOLECCIÓN (GOOGLE FRANCOTIRADOR)
 # ==========================================
 def fase_recoleccion(query_usuario):
     log_web(f"\n--- FASE 1: BÚSQUEDA EN GOOGLE: {query_usuario} ---")
@@ -83,18 +83,22 @@ def fase_recoleccion(query_usuario):
         from googlesearch import search
         
         resultados_reales = ""
-        # advanced=True nos devuelve el título, la url y la descripción
-        for r in search(f"empresas {query_usuario} contacto web", num_results=10, advanced=True):
-            resultados_reales += f"Título: {r.title}\nWeb: {r.url}\n\n"
+        # 💡 FIX: Filtros negativos para eliminar la basura de Google
+        query_google = f"{query_usuario} -directorio -paginasamarillas -habitissimo -expansion -eleconomista -milanuncios -infoisinfo -einforma"
         
-        # Le damos los textos reales a la IA
+        # Pedimos 15 resultados porque hemos filtrado muchos
+        for r in search(query_google, num_results=15, advanced=True):
+            resultados_reales += f"Título: {r.title}\nWeb: {r.url}\nInfo: {r.description}\n\n"
+        
         prompt = f"""
         Aquí tienes resultados reales de búsqueda de Google sobre '{query_usuario}':
         {resultados_reales}
         
         Extrae el Nombre de la empresa y su URL principal.
-        REGLA 1: Solo extrae empresas que aparezcan arriba. NO INVENTES NADA.
-        REGLA 2: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
+        REGLA 1: IGNORA por completo periódicos, revistas de economía y macro-directorios.
+        REGLA 2: Solo extrae empresas locales reales que ofrezcan el servicio.
+        REGLA 3: NO INVENTES NADA. Si no hay 5, devuelve las que haya.
+        REGLA 4: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
         """
         
         respuesta = llm_flash.invoke(prompt)
@@ -111,7 +115,8 @@ def fase_recoleccion(query_usuario):
                 nombre, web = partes[0].strip(), partes[1].strip()
                 web = web.strip('.') 
                 
-                if nombre.lower() not in nombres_existentes and "http" in web:
+                # Descartamos manualmente si la IA se equivoca y cuela un directorio
+                if nombre.lower() not in nombres_existentes and "http" in web and not any(basura in web.lower() for basura in ['expansion.com', 'eleconomista.es', 'paginasamarillas', 'habitissimo']):
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
                     
