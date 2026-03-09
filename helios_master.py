@@ -132,10 +132,19 @@ def extraer_con_playwright(url):
             return f"TEXTO WEB:\n{texto_web}\n\nPOSIBLES PROYECTOS (PDF):\n{texto_pdf}"[:6000]
     except Exception as e: return f"Error de acceso: {e}"
 
-def fase_cualificacion(fila, index, query_usuario):
+def fase_cualificacion(fila, index, query_usuario, propuesta_valor):
     log_web(f"  🔍 Auditando web de {fila[0]}...")
     contexto = extraer_con_playwright(fila[1])
-    prompt = f"Actúa como auditor B2B. Texto web: {contexto}\n¿La empresa '{fila[0]}' encaja con el perfil buscado: '{query_usuario}'? Responde EXACTAMENTE:\nCUALIFICADO: [SI/NO]\nRESUMEN: [30 palabras]"
+    
+    # 💡 FIX: El prompt ahora evalúa si son buenos clientes para LO QUE VENDES
+    prompt = f"""Actúa como auditor B2B. Texto web extraído: {contexto}
+    Buscamos empresas con este perfil: '{query_usuario}'.
+    Nuestro objetivo es ofrecerles esto: '{propuesta_valor}'.
+    
+    ¿La empresa '{fila[0]}' es un buen cliente potencial para esta oferta? Responde EXACTAMENTE:
+    CUALIFICADO: [SI/NO]
+    RESUMEN: [Máximo 30 palabras justificando por qué les serviría nuestra oferta]"""
+    
     res = llm_flash.invoke([HumanMessage(content=prompt)]).content
     c, r = "NO", "Sin datos"
     for l in res.split('\n'):
@@ -242,24 +251,26 @@ def investigar_linkedin_directivo(fila, index_fila):
 # ==========================================
 # ✍️ FASE 3: REDACCIÓN DEL CORREO 
 # ==========================================
-def fase_redaccion(fila, index_fila):
+def fase_redaccion(fila, index_fila, propuesta_valor):
     nombre, resumen = fila[0], fila[3]
     log_web(f"  ✍️ Redactando email para {nombre}...")
     
+    # 💡 FIX: El copywriter ahora sabe exactamente qué tiene que vender
     prompt = f"""
     Eres un experto copywriter B2B. Tu cliente objetivo es la empresa: {nombre}. 
     Contexto de la empresa: {resumen}
     
-    Escribe un correo corto y persuasivo de puerta fría para ellos.
+    Lo que queremos venderles/ofrecerles es lo siguiente: {propuesta_valor}
+    
+    Escribe un correo corto y persuasivo de puerta fría ofreciendo nuestra solución. Ve al grano, sin saludos robóticos.
     
     Formato EXACTO de respuesta:
-    ASUNTO: [Asunto]
+    ASUNTO: [Asunto corto que genere curiosidad]
     CUERPO: [Cuerpo del correo]
     """
     
     try:
         texto = llm_creativo.invoke([HumanMessage(content=prompt)]).content
-        
         if "ASUNTO:" in texto and "CUERPO:" in texto:
             partes_cuerpo = texto.split("CUERPO:")
             asunto = partes_cuerpo[0].replace("ASUNTO:", "").strip().replace('\n', '')
@@ -313,13 +324,15 @@ def enviar_correo_manual(nombre_empresa, nuevo_asunto=None, nuevo_cuerpo=None):
 # 🧠 PROCESAMIENTO DE UNA FILA ÚNICA
 # ==========================================
 def procesar_prospecto_individual(datos_proceso):
-    index, fila, query_usuario = datos_proceso
+    # 💡 FIX: Desempaquetamos la nueva variable propuesta_valor
+    index, fila, query_usuario, propuesta_valor = datos_proceso
     
     while len(fila) < 11: fila.append("")
     
     try:
         if fila[2] == "" or "ERROR" in fila[2].upper():
-            fase_cualificacion(fila, index, query_usuario)
+            # 💡 FIX: Le pasamos la propuesta a la cualificación
+            fase_cualificacion(fila, index, query_usuario, propuesta_valor)
             fila = sheet.row_values(index) 
         
         if fila[2].upper() != "SI":
@@ -337,7 +350,8 @@ def procesar_prospecto_individual(datos_proceso):
 
         while len(fila) < 11: fila.append("")
         if fila[4] == "":
-            fase_redaccion(fila, index)
+            # 💡 FIX: Le pasamos la propuesta a la redacción
+            fase_redaccion(fila, index, propuesta_valor)
             fila = sheet.row_values(index)
 
         return f"Éxito: {fila[0]} procesado."
@@ -345,11 +359,10 @@ def procesar_prospecto_individual(datos_proceso):
     except Exception as e:
         log_web(f"❌ Error procesando {fila[0]}: {e}")
         return f"Error: {fila[0]}"
-
 # ==========================================
 # 🚀 EL NUEVO ORQUESTADOR MULTI-HILO
 # ==========================================
-def orquestador(query_usuario="empresas instaladoras solares en España"):
+def orquestador(query_usuario="empresas", propuesta_valor="Servicios B2B"):
     fase_recoleccion(query_usuario)
     
     log_web("\n--- ⚡ INICIANDO MODO MULTI-HILO (5 a la vez) ---")
@@ -357,7 +370,8 @@ def orquestador(query_usuario="empresas instaladoras solares en España"):
     filas_brutas = sheet.get_all_values()
     tareas = []
     for i, f in enumerate(filas_brutas[1:], start=2):
-        tareas.append((i, f, query_usuario))
+        # 💡 FIX: Añadimos la propuesta_valor al paquete de tareas
+        tareas.append((i, f, query_usuario, propuesta_valor))
 
     with ThreadPoolExecutor(max_workers=5) as executor:
         resultados = list(executor.map(procesar_prospecto_individual, tareas))
@@ -365,6 +379,6 @@ def orquestador(query_usuario="empresas instaladoras solares en España"):
     log_web("\n🎉 ¡PROCESO MULTI-HILO COMPLETADO!")
     for res in resultados:
         print(f"  > {res}")
-
+        
 if __name__ == "__main__":
     orquestador()
