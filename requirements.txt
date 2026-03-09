@@ -9,3 +9,4 @@ duckduckgo-search
 playwright
 PyPDF2
 requests
+duckduckgo-search
