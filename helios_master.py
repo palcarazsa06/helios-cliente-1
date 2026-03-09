@@ -122,8 +122,12 @@ def fase_recoleccion(query_usuario):
                 nombre, web = partes[0].strip(), partes[1].strip()
                 web = web.strip('.') 
                 
-                # Doble filtro anti-basura
-                if nombre.lower() not in nombres_existentes and "http" in web and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios']):
+                # 💡 FIX: Si la IA no le pone el https://, se lo ponemos nosotros
+                if not web.startswith("http"):
+                    web = "https://" + web
+                
+                # Filtro anti-basura (ahora sin rechazar las que venían sin http)
+                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios', 'infoisinfo']):
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
                     
