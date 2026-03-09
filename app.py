@@ -63,12 +63,16 @@ sheet = conectar_bd()
 
 # --- BARRA LATERAL ---
 st.sidebar.title("🎯 Misión de Búsqueda")
-mision_busqueda = st.sidebar.text_input("¿Qué buscamos?", "instaladoras placas solares España")
+
+# 💡 FIX: Añadimos las dos cajas separadas
+mision_busqueda = st.sidebar.text_input("1. ¿A quién buscamos?", "instaladoras aire acondicionado Murcia")
+propuesta_valor = st.sidebar.text_area("2. ¿Qué les vamos a ofrecer/vender?", "Un software de IA para automatizar la captación de clientes y ahorrar 10h semanales.")
 
 if st.sidebar.button("🚀 Lanzar Orquestador"):
     if sheet:
         with st.spinner(f"Helios trabajando en: {mision_busqueda}..."):
-            helios_master.orquestador(mision_busqueda)
+            # 💡 FIX: Ahora le pasamos LOS DOS textos al orquestador
+            helios_master.orquestador(mision_busqueda, propuesta_valor)
             st.cache_resource.clear()
             st.sidebar.success("¡Misión completada!")
             st.rerun()
