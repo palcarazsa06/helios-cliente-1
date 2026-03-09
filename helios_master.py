@@ -74,25 +74,22 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (DUCKDUCKGO PURO)
+# 🕵️ FASE 1: RECOLECCIÓN (GOOGLE SEARCH DIRECTO)
 # ==========================================
 def fase_recoleccion(query_usuario):
-    log_web(f"\n--- FASE 1: BÚSQUEDA EN INTERNET REAL: {query_usuario} ---")
+    log_web(f"\n--- FASE 1: BÚSQUEDA EN GOOGLE: {query_usuario} ---")
     
     try:
-        # Importamos la librería pura, sin intermediarios
-        from duckduckgo_search import DDGS
+        from googlesearch import search
         
         resultados_reales = ""
-        # Buscamos de verdad en internet
-        with DDGS() as ddgs:
-            busqueda = list(ddgs.text(f"empresas {query_usuario} contacto web", max_results=10))
-            for r in busqueda:
-                resultados_reales += f"Título: {r['title']}\nWeb: {r['href']}\n\n"
+        # advanced=True nos devuelve el título, la url y la descripción
+        for r in search(f"empresas {query_usuario} contacto web", num_results=10, advanced=True):
+            resultados_reales += f"Título: {r.title}\nWeb: {r.url}\n\n"
         
         # Le damos los textos reales a la IA
         prompt = f"""
-        Aquí tienes resultados reales de búsqueda de internet sobre '{query_usuario}':
+        Aquí tienes resultados reales de búsqueda de Google sobre '{query_usuario}':
         {resultados_reales}
         
         Extrae el Nombre de la empresa y su URL principal.
@@ -201,30 +198,25 @@ def buscar_email_directivo(fila, index_fila):
         sheet.update_cell(index_fila, 8, f"info@{dominio}")
 
 # ==========================================
-# 🥷 FASE 2.5: EL NINJA DE LINKEDIN (NIVEL DIOS - FIX DUCKDUCKGO PURO)
+# 🥷 FASE 2.5: EL NINJA DE LINKEDIN (NIVEL DIOS - FIX GOOGLE SEARCH)
 # ==========================================
 def investigar_linkedin_directivo(fila, index_fila):
     nombre_empresa, resumen_actual = fila[0], fila[3]
     log_web(f"  🥷 Modo Ninja: X-Ray Search para {nombre_empresa}...")
     
-    # 💡 FIX 1: Retraso aleatorio para evitar bloqueos
-    time.sleep(random.uniform(2.0, 5.0))
+    time.sleep(random.uniform(2.0, 4.0)) # Retraso para no saturar a Google
     
     try:
-        # 🔥 ELIMINAMOS LANGCHAIN AQUÍ Y USAMOS DDGS DIRECTO 🔥
-        from duckduckgo_search import DDGS
+        from googlesearch import search
         query = f'"{nombre_empresa}" (CEO OR Fundador OR Director OR Operaciones) site:linkedin.com/in/'
         
         resultados = ""
         try:
-            with DDGS() as ddgs:
-                busqueda = list(ddgs.text(query, max_results=4))
-                for r in busqueda:
-                    resultados += f"Perfil: {r['title']} - URL: {r['href']} - Info: {r['body']}\n"
-        except Exception:
-            resultados = "" # Si DDG falla, pasamos vacío para que active el Plan B
+            for r in search(query, num_results=4, advanced=True):
+                resultados += f"Perfil: {r.title} - URL: {r.url} - Info: {r.description}\n"
+        except Exception as e:
+            resultados = "" # Si Google nos frena temporalmente, pasamos al plan B
         
-        # 💡 FIX 2: Prompt a prueba de fallos. SIEMPRE genera mensaje.
         prompt = f"""
         Analiza estos resultados de búsqueda sobre la empresa '{nombre_empresa}': 
         {resultados}
@@ -238,11 +230,9 @@ def investigar_linkedin_directivo(fila, index_fila):
         MENSAJE: [Nota de invitación de LinkedIn de MÁXIMO 250 caracteres. Si hay nombre, dirígete a él. Si no, dirígete al equipo de {nombre_empresa}]
         """
         
-        # Invocamos a la IA
         respuesta = llm_flash.invoke(prompt)
         texto = respuesta.content if hasattr(respuesta, 'content') else str(respuesta)
         
-        # 💡 FIX 3: Extracción robusta. Ignora negritas (**), asteriscos y espacios extra
         n_ninja = re.search(r"NOMBRE:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE)
         c_ninja = re.search(r"CARGO:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE)
         u_ninja = re.search(r"URL:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE)
@@ -256,7 +246,6 @@ def investigar_linkedin_directivo(fila, index_fila):
         if n_val.upper() == "NADA": n_val = ""
         if u_val.upper() == "NADA": u_val = ""
 
-        # Si encontramos a la persona, actualizamos el resumen para el email
         if n_val:
             datos_ninja = f"{n_val} | {c_val}"
             log_web(f"    🎯 ¡Perfil localizado!: {n_val}")
@@ -265,12 +254,10 @@ def investigar_linkedin_directivo(fila, index_fila):
         else:
             log_web(f"    ⚠️ Ninja ciego, pero se generó mensaje genérico de red.")
         
-        # Limpieza final de la URL
         u_val = u_val.replace('<', '').replace('>', '').replace('"', '').replace("'", "")
         if u_val and "linkedin.com" in u_val and not u_val.startswith("http"):
             u_val = "https://" + u_val
             
-        # Seguro final por si el modelo falla al dar el mensaje
         if not m_val:
             m_val = f"Hola, me encantaría conectar con el equipo de {nombre_empresa} para compartir sinergias. ¡Un saludo!"
 
@@ -279,9 +266,8 @@ def investigar_linkedin_directivo(fila, index_fila):
         
     except Exception as e: 
         log_web(f"    ❌ Error Ninja: {e}")
-        # Si explota todo, dejamos un mensaje genérico para que la web NO desaparezca
         sheet.update_cell(index_fila, 10, f"Hola, me encantaría conectar con el equipo de {nombre_empresa} para explorar sinergias. ¡Saludos!")
-
+        
 # ==========================================
 # ✍️ FASE 3: REDACCIÓN DEL CORREO 
 # ==========================================
