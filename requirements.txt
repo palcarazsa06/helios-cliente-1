@@ -10,4 +10,4 @@ playwright
 langchain-google-genai
 langchain-core
 langchain-community
-duckduckgo-search
+googlesearch-python
