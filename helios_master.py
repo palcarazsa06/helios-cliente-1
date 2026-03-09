@@ -74,29 +74,34 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (AHORA CON INTERNET REAL)
+# 🕵️ FASE 1: RECOLECCIÓN (DUCKDUCKGO PURO)
 # ==========================================
 def fase_recoleccion(query_usuario):
     log_web(f"\n--- FASE 1: BÚSQUEDA EN INTERNET REAL: {query_usuario} ---")
     
     try:
-        # 1. Buscamos en internet real primero
-        from langchain_community.tools import DuckDuckGoSearchResults
-        buscador = DuckDuckGoSearchResults(num_results=10)
-        resultados_reales = buscador.invoke(f"empresas {query_usuario} contacto web")
+        # Importamos la librería pura, sin intermediarios
+        from duckduckgo_search import DDGS
         
-        # 2. Le damos los resultados a la IA para que solo extraiga la info real
+        resultados_reales = ""
+        # Buscamos de verdad en internet
+        with DDGS() as ddgs:
+            busqueda = list(ddgs.text(f"empresas {query_usuario} contacto web", max_results=10))
+            for r in busqueda:
+                resultados_reales += f"Título: {r['title']}\nWeb: {r['href']}\n\n"
+        
+        # Le damos los textos reales a la IA
         prompt = f"""
         Aquí tienes resultados reales de búsqueda de internet sobre '{query_usuario}':
         {resultados_reales}
         
-        Extrae el Nombre de la empresa y su URL.
-        REGLA 1: Solo extrae empresas que aparezcan en el texto. NO INVENTES NADA.
+        Extrae el Nombre de la empresa y su URL principal.
+        REGLA 1: Solo extrae empresas que aparezcan arriba. NO INVENTES NADA.
         REGLA 2: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
         """
         
-        respuesta = llm_flash.invoke([HumanMessage(content=prompt)])
-        texto = "".join([p['text'] for p in respuesta.content if 'text' in p]) if isinstance(respuesta.content, list) else respuesta.content
+        respuesta = llm_flash.invoke(prompt)
+        texto = respuesta.content if hasattr(respuesta, 'content') else str(respuesta)
         
         filas_existentes = sheet.get_all_values()
         nombres_existentes = [fila[0].lower().strip() for fila in filas_existentes[1:] if len(fila) > 0]
@@ -107,7 +112,6 @@ def fase_recoleccion(query_usuario):
             if "||" in linea:
                 partes = linea.split("||")
                 nombre, web = partes[0].strip(), partes[1].strip()
-                # Limpiamos un poco la URL por si la IA añade puntos finales
                 web = web.strip('.') 
                 
                 if nombre.lower() not in nombres_existentes and "http" in web:
@@ -197,28 +201,33 @@ def buscar_email_directivo(fila, index_fila):
         sheet.update_cell(index_fila, 8, f"info@{dominio}")
 
 # ==========================================
-# 🥷 FASE 2.5: EL NINJA DE LINKEDIN (NIVEL DIOS)
+# 🥷 FASE 2.5: EL NINJA DE LINKEDIN (NIVEL DIOS - FIX DUCKDUCKGO PURO)
 # ==========================================
 def investigar_linkedin_directivo(fila, index_fila):
     nombre_empresa, resumen_actual = fila[0], fila[3]
     log_web(f"  🥷 Modo Ninja: X-Ray Search para {nombre_empresa}...")
     
-    # 💡 FIX 1: Retraso aleatorio para evitar que DuckDuckGo nos bloquee por ir muy rápido
+    # 💡 FIX 1: Retraso aleatorio para evitar bloqueos
     time.sleep(random.uniform(2.0, 5.0))
     
     try:
-        from langchain_community.tools import DuckDuckGoSearchResults
-        buscador = DuckDuckGoSearchResults(num_results=4)
+        # 🔥 ELIMINAMOS LANGCHAIN AQUÍ Y USAMOS DDGS DIRECTO 🔥
+        from duckduckgo_search import DDGS
         query = f'"{nombre_empresa}" (CEO OR Fundador OR Director OR Operaciones) site:linkedin.com/in/'
         
+        resultados = ""
         try:
-            resultados = buscador.invoke(query)
+            with DDGS() as ddgs:
+                busqueda = list(ddgs.text(query, max_results=4))
+                for r in busqueda:
+                    resultados += f"Perfil: {r['title']} - URL: {r['href']} - Info: {r['body']}\n"
         except Exception:
             resultados = "" # Si DDG falla, pasamos vacío para que active el Plan B
         
         # 💡 FIX 2: Prompt a prueba de fallos. SIEMPRE genera mensaje.
         prompt = f"""
-        Analiza estos resultados de búsqueda sobre la empresa '{nombre_empresa}': {resultados}
+        Analiza estos resultados de búsqueda sobre la empresa '{nombre_empresa}': 
+        {resultados}
         
         Busca un directivo real. Si NO lo encuentras, inventa un mensaje genérico.
         
@@ -228,7 +237,10 @@ def investigar_linkedin_directivo(fila, index_fila):
         URL: [El enlace exacto de linkedin.com/in/..., o NADA]
         MENSAJE: [Nota de invitación de LinkedIn de MÁXIMO 250 caracteres. Si hay nombre, dirígete a él. Si no, dirígete al equipo de {nombre_empresa}]
         """
-        texto = llm_flash.invoke([HumanMessage(content=prompt)]).content
+        
+        # Invocamos a la IA
+        respuesta = llm_flash.invoke(prompt)
+        texto = respuesta.content if hasattr(respuesta, 'content') else str(respuesta)
         
         # 💡 FIX 3: Extracción robusta. Ignora negritas (**), asteriscos y espacios extra
         n_ninja = re.search(r"NOMBRE:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE)
