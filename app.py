@@ -12,7 +12,7 @@ import helios_master
 # Justo después de los imports
 def check_password():
     def password_entered():
-        if st.session_state["password"] == "DoraemonElGatoCosmico": # <--- Tu contraseña
+        if st.session_state["password"] == st.secrets["ACCESS_PASSWORD"]:
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
