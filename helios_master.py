@@ -74,30 +74,37 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (GOOGLE FRANCOTIRADOR)
+# 🕵️ FASE 1: RECOLECCIÓN (RASTREADOR PURO INBLOQUEABLE)
 # ==========================================
 def fase_recoleccion(query_usuario):
-    log_web(f"\n--- FASE 1: BÚSQUEDA EN GOOGLE: {query_usuario} ---")
+    log_web(f"\n--- FASE 1: BÚSQUEDA WEB RESILIENTE: {query_usuario} ---")
     
     try:
-        from googlesearch import search
+        import requests
+        import urllib.parse
+        import re
         
-        resultados_reales = ""
-        # 💡 FIX: Filtros negativos para eliminar la basura de Google
-        query_google = f"{query_usuario} -directorio -paginasamarillas -habitissimo -expansion -eleconomista -milanuncios -infoisinfo -einforma"
+        # 1. Nos disfrazamos de navegador real de Windows
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         
-        # Pedimos 15 resultados porque hemos filtrado muchos
-        for r in search(query_google, num_results=15, advanced=True):
-            resultados_reales += f"Título: {r.title}\nWeb: {r.url}\nInfo: {r.description}\n\n"
+        # 2. Atacamos la versión antigua de DuckDuckGo (no bloquea IPs)
+        query_limpia = f"empresas {query_usuario} -directorio -paginasamarillas"
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query_limpia)}"
         
+        # 3. Descargamos la web y le arrancamos el HTML
+        res = requests.get(url, headers=headers, timeout=10)
+        texto_bruto = re.sub(r'<[^>]+>', ' ', res.text)
+        texto_bruto = re.sub(r'\s+', ' ', texto_bruto)[:10000] # Nos quedamos los primeros 10000 caracteres
+        
+        # 4. La IA actúa como minero de datos sobre el texto en bruto
         prompt = f"""
-        Aquí tienes resultados reales de búsqueda de Google sobre '{query_usuario}':
-        {resultados_reales}
+        Aquí tienes el texto en bruto escaneado de internet sobre '{query_usuario}':
+        {texto_bruto}
         
         Extrae el Nombre de la empresa y su URL principal.
-        REGLA 1: IGNORA por completo periódicos, revistas de economía y macro-directorios.
-        REGLA 2: Solo extrae empresas locales reales que ofrezcan el servicio.
-        REGLA 3: NO INVENTES NADA. Si no hay 5, devuelve las que haya.
+        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo).
+        REGLA 2: Solo extrae empresas locales reales.
+        REGLA 3: NO INVENTES NADA. Busca pistas en el texto.
         REGLA 4: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
         """
         
@@ -115,12 +122,17 @@ def fase_recoleccion(query_usuario):
                 nombre, web = partes[0].strip(), partes[1].strip()
                 web = web.strip('.') 
                 
-                # Descartamos manualmente si la IA se equivoca y cuela un directorio
-                if nombre.lower() not in nombres_existentes and "http" in web and not any(basura in web.lower() for basura in ['expansion.com', 'eleconomista.es', 'paginasamarillas', 'habitissimo']):
+                # Doble filtro anti-basura
+                if nombre.lower() not in nombres_existentes and "http" in web and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios']):
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
                     
         log_web(f"✅ Se han añadido {nuevas} empresas 100% REALES al CRM.")
+        
+        # 💡 Si añade 0, nos chivará por qué
+        if nuevas == 0:
+            log_web(f"⚠️ Chivato IA: {texto}") 
+            
     except Exception as e:
         log_web(f"❌ Error en la recolección: {e}")
 
@@ -203,36 +215,38 @@ def buscar_email_directivo(fila, index_fila):
         sheet.update_cell(index_fila, 8, f"info@{dominio}")
 
 # ==========================================
-# 🥷 FASE 2.5: EL NINJA DE LINKEDIN (NIVEL DIOS - FIX GOOGLE SEARCH)
+# 🥷 FASE 2.5: EL NINJA DE LINKEDIN (NIVEL DIOS - RASTREADOR PURO)
 # ==========================================
 def investigar_linkedin_directivo(fila, index_fila):
     nombre_empresa, resumen_actual = fila[0], fila[3]
     log_web(f"  🥷 Modo Ninja: X-Ray Search para {nombre_empresa}...")
     
-    time.sleep(random.uniform(2.0, 4.0)) # Retraso para no saturar a Google
+    time.sleep(random.uniform(2.0, 4.0)) 
     
     try:
-        from googlesearch import search
-        query = f'"{nombre_empresa}" (CEO OR Fundador OR Director OR Operaciones) site:linkedin.com/in/'
+        import requests
+        import urllib.parse
+        import re
         
-        resultados = ""
-        try:
-            for r in search(query, num_results=4, advanced=True):
-                resultados += f"Perfil: {r.title} - URL: {r.url} - Info: {r.description}\n"
-        except Exception as e:
-            resultados = "" # Si Google nos frena temporalmente, pasamos al plan B
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        query = f'"{nombre_empresa}" (CEO OR Fundador OR Director) site:linkedin.com/in/'
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        
+        res = requests.get(url, headers=headers, timeout=10)
+        texto_bruto = re.sub(r'<[^>]+>', ' ', res.text)
+        texto_bruto = re.sub(r'\s+', ' ', texto_bruto)[:8000]
         
         prompt = f"""
-        Analiza estos resultados de búsqueda sobre la empresa '{nombre_empresa}': 
-        {resultados}
+        Analiza este texto escaneado de internet buscando a la directiva de '{nombre_empresa}': 
+        {texto_bruto}
         
-        Busca un directivo real. Si NO lo encuentras, inventa un mensaje genérico.
+        Busca un directivo real y su URL. Si NO lo encuentras, inventa un mensaje genérico.
         
         Responde EXACTAMENTE con este formato de 4 líneas (sin asteriscos):
         NOMBRE: [Su Nombre, o NADA]
         CARGO: [Su Cargo, o Responsable]
         URL: [El enlace exacto de linkedin.com/in/..., o NADA]
-        MENSAJE: [Nota de invitación de LinkedIn de MÁXIMO 250 caracteres. Si hay nombre, dirígete a él. Si no, dirígete al equipo de {nombre_empresa}]
+        MENSAJE: [Nota de invitación de LinkedIn de MÁXIMO 250 caracteres. Si hay nombre, dirígete a él. Si no, al equipo]
         """
         
         respuesta = llm_flash.invoke(prompt)
@@ -257,7 +271,7 @@ def investigar_linkedin_directivo(fila, index_fila):
             nuevo_resumen = f"{resumen_actual}\n\n[DATOS NINJA]: {datos_ninja}\nINSTRUCCIÓN EXTRA: Empieza dirigiéndote a {n_val}, sobre su perfil de {c_val}."
             sheet.update_cell(index_fila, 4, nuevo_resumen)
         else:
-            log_web(f"    ⚠️ Ninja ciego, pero se generó mensaje genérico de red.")
+            log_web(f"    ⚠️ Ninja ciego, se generó mensaje genérico.")
         
         u_val = u_val.replace('<', '').replace('>', '').replace('"', '').replace("'", "")
         if u_val and "linkedin.com" in u_val and not u_val.startswith("http"):
