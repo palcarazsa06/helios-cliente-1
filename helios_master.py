@@ -32,6 +32,8 @@ log_web("🚀 INICIANDO EL ORQUESTADOR HELIOS (Versión Text-Only)...")
 
 load_dotenv()
 
+api_gemini = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else os.getenv("GOOGLE_API_KEY")
+
 llm_flash = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 llm_creativo = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.5)
 
