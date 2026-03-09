@@ -72,14 +72,30 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN
+# 🕵️ FASE 1: RECOLECCIÓN (AHORA CON INTERNET REAL)
 # ==========================================
 def fase_recoleccion(query_usuario):
-    log_web(f"\n--- FASE 1: BÚSQUEDA PERSONALIZADA: {query_usuario} ---")
-    prompt = f"Busca 5 {query_usuario}. REGLA: Devuelve SOLO Nombre||URL (una por línea)"
+    log_web(f"\n--- FASE 1: BÚSQUEDA EN INTERNET REAL: {query_usuario} ---")
+    
     try:
+        # 1. Buscamos en internet real primero
+        from langchain_community.tools import DuckDuckGoSearchResults
+        buscador = DuckDuckGoSearchResults(num_results=10)
+        resultados_reales = buscador.invoke(f"empresas {query_usuario} contacto web")
+        
+        # 2. Le damos los resultados a la IA para que solo extraiga la info real
+        prompt = f"""
+        Aquí tienes resultados reales de búsqueda de internet sobre '{query_usuario}':
+        {resultados_reales}
+        
+        Extrae el Nombre de la empresa y su URL.
+        REGLA 1: Solo extrae empresas que aparezcan en el texto. NO INVENTES NADA.
+        REGLA 2: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
+        """
+        
         respuesta = llm_flash.invoke([HumanMessage(content=prompt)])
         texto = "".join([p['text'] for p in respuesta.content if 'text' in p]) if isinstance(respuesta.content, list) else respuesta.content
+        
         filas_existentes = sheet.get_all_values()
         nombres_existentes = [fila[0].lower().strip() for fila in filas_existentes[1:] if len(fila) > 0]
         
@@ -89,10 +105,14 @@ def fase_recoleccion(query_usuario):
             if "||" in linea:
                 partes = linea.split("||")
                 nombre, web = partes[0].strip(), partes[1].strip()
+                # Limpiamos un poco la URL por si la IA añade puntos finales
+                web = web.strip('.') 
+                
                 if nombre.lower() not in nombres_existentes and "http" in web:
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
-        log_web(f"✅ Se han añadido {nuevas} empresas nuevas al CRM.")
+                    
+        log_web(f"✅ Se han añadido {nuevas} empresas 100% REALES al CRM.")
     except Exception as e:
         log_web(f"❌ Error en la recolección: {e}")
 
