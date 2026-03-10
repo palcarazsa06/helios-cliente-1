@@ -59,26 +59,67 @@ except Exception as e:
 # 🕵️ FASE 1: RECOLECCIÓN (Usando DDGS)
 # ==========================================
 def fase_recoleccion(query_usuario):
-    log_web(f"\n--- FASE 1: RASTREO CON DDGS (Filtro ES): {query_usuario} ---")
+    log_web(f"\n--- FASE 1: RASTREO HÍBRIDO (WEB + IA): {query_usuario} ---")
     nuevas = 0
+    resultados_finales = []
+
+    # 1. INTENTO A: RASTREO WEB (DuckDuckGo España)
     try:
         with DDGS() as ddgs:
             query_limpia = f"{query_usuario} -site:paginasamarillas.es -site:habitissimo.es"
-            # 💡 FIX: Bloqueamos la región a España para evitar webs chinas o rusas
+            # Buscamos en España. Si la IP está bloqueada, esto devolverá una lista vacía.
             resultados = list(ddgs.text(query_limpia, region='es-es', safesearch='moderate', max_results=10))
             
-            filas_existentes = sheet.get_all_values()
-            nombres_existentes = [f[0].lower().strip() for f in filas_existentes[1:] if len(f) > 0]
-
             for r in resultados:
-                nombre = r['title'].split("-")[0].split("|")[0].strip()
-                web = r['href']
-                if nombre.lower() not in nombres_existentes:
-                    sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", "", ""])
-                    nuevas += 1
-        log_web(f"✅ {nuevas} empresas reales añadidas.")
+                resultados_finales.append({
+                    "nombre": r['title'].split("-")[0].split("|")[0].strip(),
+                    "web": r['href']
+                })
+        if len(resultados_finales) > 0:
+            log_web(f"  🌐 Búsqueda web exitosa: {len(resultados_finales)} resultados.")
     except Exception as e:
-        log_web(f"❌ Error DDGS: {e}")
+        log_web(f"  ⚠️ Error en buscador web: {e}")
+
+    # 2. INTENTO B: PLAN DE RESCATE (Cerebro de Gemini)
+    if len(resultados_finales) == 0:
+        log_web("  🧱 IP bloqueada por el buscador. Activando Rescate IA...")
+        prompt_rescate = f"""
+        Actúa como un directorio empresarial de España.
+        Necesito 5 empresas REALES que encajen exactamente con esta descripción: '{query_usuario}'. 
+        
+        REGLA CRÍTICA: Devuelve SOLO Nombre||URL (una por línea). NO inventes webs.
+        Ejemplo: SolarCity S.L.||https://www.solarcity.es
+        """
+        try:
+            res_ia = llm_flash.invoke([HumanMessage(content=prompt_rescate)]).content
+            for linea in res_ia.split('\n'):
+                if "||" in linea:
+                    partes = linea.split("||")
+                    resultados_finales.append({
+                        "nombre": partes[0].replace("*", "").strip(), 
+                        "web": partes[1].replace("*", "").strip()
+                    })
+        except Exception as e:
+            log_web(f"  ❌ Error en Plan B de IA: {e}")
+
+    # 3. FILTRADO E INSERCIÓN EN CRM
+    try:
+        filas_existentes = sheet.get_all_values()
+        nombres_existentes = [f[0].lower().strip() for f in filas_existentes[1:] if len(f) > 0]
+
+        for emp in resultados_finales:
+            nombre_limpio = emp['nombre']
+            web_limpia = emp['web']
+            
+            # Limpieza básica para evitar basura
+            if nombre_limpio.lower() not in nombres_existentes and "http" in web_limpia.lower():
+                # 💡 FIX: Insertamos 12 columnas vacías para que el Modo Noticias tenga su sitio
+                sheet.append_row([nombre_limpio, web_limpia, "", "", "", "", "", "", "", "", "", ""])
+                nuevas += 1
+                
+        log_web(f"✅ Se han añadido {nuevas} empresas al CRM.")
+    except Exception as e:
+        log_web(f"❌ Error insertando en Google Sheets: {e}")
         
 def fase_noticias(nombre_empresa):
     """
