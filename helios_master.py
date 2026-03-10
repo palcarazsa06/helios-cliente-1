@@ -59,28 +59,54 @@ except Exception as e:
 # 🕵️ FASE 1: RECOLECCIÓN (Usando DDGS)
 # ==========================================
 def fase_recoleccion(query_usuario):
-    log_web(f"\n--- FASE 1: BÚSQUEDA RESILIENTE CON DDGS: {query_usuario} ---")
+    log_web(f"\n--- FASE 1: BÚSQUEDA RESILIENTE (WEB + IA): {query_usuario} ---")
     nuevas = 0
-    try:
-        # Usamos DDGS para saltarnos los muros de cookies y bloqueos
-        with DDGS() as ddgs:
-            query_limpia = f"{query_usuario} -directorios -paginasamarillas"
-            resultados = list(ddgs.text(query_limpia, max_results=10))
-            
-            filas_existentes = sheet.get_all_values()
-            nombres_existentes = [f[0].lower().strip() for f in filas_existentes[1:] if len(f) > 0]
+    resultados_finales = []
 
+    # 1. INTENTO A: DuckDuckGo (Web Real)
+    try:
+        with DDGS() as ddgs:
+            # Quitamos los filtros negativos momentáneamente para asegurar resultados
+            resultados = list(ddgs.text(query_usuario, max_results=10))
             for r in resultados:
-                nombre = r['title'].split("-")[0].split("|")[0].strip()
-                web = r['href']
-                
-                if nombre.lower() not in nombres_existentes:
-                    # Insertamos fila con estructura completa (11 columnas)
-                    sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
-                    nuevas += 1
-        log_web(f"✅ Se han añadido {nuevas} empresas reales.")
+                resultados_finales.append({
+                    "nombre": r['title'].split("-")[0].split("|")[0].strip(),
+                    "web": r['href']
+                })
+        log_web(f"  🌐 DuckDuckGo ha devuelto {len(resultados_finales)} resultados.")
     except Exception as e:
-        log_web(f"❌ Error en recolección DDGS: {e}")
+        log_web(f"  ⚠️ DuckDuckGo bloqueado o lento: {e}")
+
+    # 2. INTENTO B: Plan de Rescate con Gemini (Si DDG falla o da 0)
+    if len(resultados_finales) == 0:
+        log_web("  🧠 Activando Plan B: Sugerencias de la IA por bloqueo de IP...")
+        prompt_rescate = f"""Necesito 5 empresas reales de este sector: '{query_usuario}'. 
+        Devuelve SOLO Nombre||URL (una por línea). 
+        Ejemplo: Empresa S.A.||https://www.empresa.com"""
+        
+        try:
+            res_ia = llm_flash.invoke(prompt_rescate).content
+            for linea in res_ia.split('\n'):
+                if "||" in linea:
+                    partes = linea.split("||")
+                    resultados_finales.append({"nombre": partes[0].strip(), "web": partes[1].strip()})
+        except Exception as e:
+            log_web(f"  ❌ Error en Plan B de IA: {e}")
+
+    # 3. FILTRADO E INSERCIÓN EN EL CRM
+    try:
+        filas_existentes = sheet.get_all_values()
+        nombres_existentes = [f[0].lower().strip() for f in filas_existentes[1:] if len(f) > 0]
+
+        for emp in resultados_finales:
+            if emp['nombre'].lower() not in nombres_existentes and "http" in emp['web']:
+                # Estructura completa de 11 columnas para evitar errores de índice
+                sheet.append_row([emp['nombre'], emp['web'], "", "", "", "", "", "", "", "", ""])
+                nuevas += 1
+        
+        log_web(f"✅ Se han añadido {nuevas} empresas al CRM.")
+    except Exception as e:
+        log_web(f"❌ Error al escribir en Google Sheets: {e}")
 
 # ==========================================
 # 🔬 FASE 2: CUALIFICACIÓN (BS4 + Requests)
