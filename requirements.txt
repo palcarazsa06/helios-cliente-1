@@ -1,13 +1,12 @@
 streamlit
 gspread
 oauth2client
-google-auth
 pandas
 python-dotenv
-requests
-PyPDF2
-beautifulsoup4
 langchain-google-genai
-langchain-core
 langchain-community
+duckduckgo-search
+playwright
+PyPDF2
+requests
 duckduckgo-search
