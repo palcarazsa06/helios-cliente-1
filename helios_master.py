@@ -59,74 +59,79 @@ except Exception as e:
 # 🕵️ FASE 1: RECOLECCIÓN (Usando DDGS)
 # ==========================================
 def fase_recoleccion(query_usuario):
-    log_web(f"\n--- FASE 1: RASTREO REAL CON DDGS: {query_usuario} ---")
+    log_web(f"\n--- FASE 1: BÚSQUEDA RESILIENTE CON DDGS: {query_usuario} ---")
     nuevas = 0
     try:
+        # Usamos DDGS para saltarnos los muros de cookies y bloqueos
         with DDGS() as ddgs:
-            # Buscamos empresas reales, evitando directorios basura
-            query_limpia = f"{query_usuario} -site:paginasamarillas.es -site:habitissimo.es -site:milanuncios.com"
+            query_limpia = f"{query_usuario} -directorios -paginasamarillas"
             resultados = list(ddgs.text(query_limpia, max_results=10))
             
             filas_existentes = sheet.get_all_values()
-            nombres_existentes = [fila[0].lower().strip() for fila in filas_existentes[1:] if len(fila) > 0]
+            nombres_existentes = [f[0].lower().strip() for f in filas_existentes[1:] if len(f) > 0]
 
             for r in resultados:
-                nombre = r['title'].split("-")[0].strip()
-                url = r['href']
+                nombre = r['title'].split("-")[0].split("|")[0].strip()
+                web = r['href']
                 
                 if nombre.lower() not in nombres_existentes:
-                    sheet.append_row([nombre, url, "", "", "", "", "", "", "", "", ""])
+                    # Insertamos fila con estructura completa (11 columnas)
+                    sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
-        log_web(f"✅ ¡Éxito! {nuevas} prospectos reales añadidos.")
+        log_web(f"✅ Se han añadido {nuevas} empresas reales.")
     except Exception as e:
-        log_web(f"❌ Error DDGS: {e}")
+        log_web(f"❌ Error en recolección DDGS: {e}")
 
 # ==========================================
 # 🔬 FASE 2: CUALIFICACIÓN (BS4 + Requests)
 # ==========================================
 def extraer_ligero(url):
-    """Extrae texto sin necesidad de Playwright"""
+    """Extrae texto de una web sin usar navegadores pesados."""
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
         res = requests.get(url, headers=headers, timeout=10)
         res.raise_for_status()
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # Limpiamos scripts y estilos
-        for script in soup(["script", "style"]):
-            script.decompose()
+        # Eliminamos basura visual (scripts y estilos)
+        for element in soup(["script", "style", "nav", "footer", "header"]):
+            element.decompose()
             
         texto = soup.get_text(separator=' ')
-        return " ".join(texto.split())[:5000] # Limite para Gemini
+        # Limpiamos espacios en blanco extra y limitamos caracteres para la ventana de contexto de Gemini
+        return " ".join(texto.split())[:6000] 
     except Exception as e:
         return f"Error leyendo web: {e}"
 
 def fase_cualificacion(fila, index, query_usuario, propuesta_valor):
-    log_web(f"  🔍 Analizando {fila[0]}...")
+    """Audita la web y decide si es un cliente ideal (ICP)."""
+    log_web(f"  🔍 Auditando web de {fila[0]}...")
     contexto = extraer_ligero(fila[1])
     
-    prompt = f"""Analiza esta empresa para una campaña B2B.
-    Web: {fila[1]}
-    Contenido extraído: {contexto}
+    # 💡 Le damos a Gemini tanto lo que buscamos como lo que vendemos
+    prompt = f"""Actúa como auditor B2B experto.
+    EMPRESA: {fila[0]}
+    WEB: {fila[1]}
+    CONTENIDO EXTRAÍDO: {contexto}
     
-    Buscamos: {query_usuario}
-    Ofrecemos: {propuesta_valor}
+    PERFIL BUSCADO: '{query_usuario}'
+    NUESTRA OFERTA: '{propuesta_valor}'
     
-    ¿Es un prospecto válido? Responde:
+    ¿Es esta empresa un buen cliente potencial para lo que ofrecemos? Responde EXACTAMENTE:
     CUALIFICADO: [SI/NO]
-    RESUMEN: [Por qué encaja en 25 palabras]"""
+    RESUMEN: [Máximo 30 palabras explicando por qué encaja o por qué no]"""
     
     try:
         res = llm_flash.invoke([HumanMessage(content=prompt)]).content
         c = "SI" if "CUALIFICADO: SI" in res.upper() else "NO"
-        # Extracción simple del resumen
-        r = res.split("RESUMEN:")[1].strip() if "RESUMEN:" in res else "Sin resumen"
-        
+        r = "Sin datos"
+        for l in res.split('\n'):
+            if "RESUMEN:" in l: r = l.split(":")[1].strip()
+            
         sheet.update_cell(index, 3, c)
         sheet.update_cell(index, 4, r)
-    except:
-        sheet.update_cell(index, 3, "NO")
-        sheet.update_cell(index, 4, "Error en análisis")
+    except Exception as e:
+        log_web(f"    ❌ Error en auditoría: {e}")
 
 # ==========================================
 # 🎯 FASE 2.5: HUNTER & LINKEDIN
@@ -305,87 +310,88 @@ def enviar_correo_manual(nombre_empresa, nuevo_asunto=None, nuevo_cuerpo=None):
     except Exception as e: return False
 
 # ==========================================
-# 🧠 PROCESAMIENTO DE UNA FILA ÚNICA (LIGERO & RESILIENTE)
+# 🧠 PROCESAMIENTO DE UNA FILA ÚNICA (NIVEL ELITE)
 # ==========================================
 def procesar_prospecto_individual(datos_proceso):
     """
-    Gestiona el ciclo de vida de un prospecto: 
-    Cualificación -> Datos de Contacto -> Ninja LinkedIn -> Redacción
+    Gestiona el ciclo de vida completo de un prospecto en Helios OS.
     """
-    # Desempaquetamos la configuración de la misión
+    # Desempaquetamos los datos de la misión
     index, fila, query_usuario, propuesta_valor = datos_proceso
     
-    # Aseguramos que la fila tenga columnas suficientes para evitar IndexError
+    # Rellenar columnas faltantes para evitar errores de índice
     while len(fila) < 11: fila.append("")
     
     try:
-        # 1. FASE DE CUALIFICACIÓN (Si no está cualificado o hubo error previo)
-        if fila[2] == "" or "ERROR" in fila[2].upper():
+        # 1. FASE DE CUALIFICACIÓN (Auditoría con BeautifulSoup)
+        # Solo se ejecuta si la celda 'Cualificado' está vacía o tiene error
+        if fila[2] == "" or "ERROR" in str(fila[2]).upper():
             fase_cualificacion(fila, index, query_usuario, propuesta_valor)
-            # Refrescamos los datos de la fila tras actualizar la celda
-            fila = sheet.row_values(index) 
+            fila = sheet.row_values(index) # Refresco post-escritura
         
-        # Si después de auditar, la IA decide que NO encaja, paramos aquí
-        if fila[2].upper() != "SI":
+        # Si la IA descarta la empresa, terminamos el proceso para esta fila
+        if str(fila[2]).upper() != "SI":
             return f"Fin: {fila[0]} (No cualificado)"
 
-        # Asegurar longitud de fila para las siguientes fases
+        # Aseguramos longitud de fila para fases de datos
         while len(fila) < 11: fila.append("")
 
-        # 2. BÚSQUEDA DE EMAIL (Si está vacío)
-        if fila[7] == "" or fila[7] is None:
+        # 2. BÚSQUEDA DE EMAIL (Hunter API)
+        if not fila[7] or fila[7] == "":
             buscar_email_directivo(fila, index)
             fila = sheet.row_values(index)
             
-        # 3. MODO NINJA LINKEDIN (Si no tiene los [DATOS NINJA] en el resumen)
+        # 3. MODO NINJA (Investigación en LinkedIn)
+        # Se activa si no hemos encontrado al directivo todavía
         while len(fila) < 11: fila.append("")
         if "[DATOS NINJA]" not in str(fila[3]):
             investigar_linkedin_directivo(fila, index)
             fila = sheet.row_values(index)
 
-        # 4. REDACCIÓN DE EMAIL (Si no hay asunto generado)
+        # 4. REDACCIÓN DE EMAIL (Copywriting Persuasi-IA)
+        # Solo si no existe ya un borrador (Asunto en columna 5)
         while len(fila) < 11: fila.append("")
-        if fila[4] == "" or fila[4] is None:
+        if not fila[4] or fila[4] == "":
             fase_redaccion(fila, index, propuesta_valor)
             fila = sheet.row_values(index)
 
-        return f"Éxito: {fila[0]} procesado correctamente."
+        return f"Éxito: {fila[0]} listo para envío."
 
     except Exception as e:
-        log_web(f"❌ Error procesando {fila[0]}: {e}")
+        log_web(f"❌ Error crítico en {fila[0]}: {e}")
         return f"Error: {fila[0]}"
 
 # ==========================================
-# 🚀 EL ORQUESTADOR MULTI-HILO (OPTIMIZADO PARA CLOUD)
+# 🚀 EL ORQUESTADOR HELIOS (POTENCIA MÁXIMA)
 # ==========================================
 def orquestador(query_usuario="empresas", propuesta_valor="Servicios B2B"):
     """
-    Punto de entrada principal. Lanza la recolección y procesa en paralelo.
+    Orquestador principal: Recolecta nuevas empresas y procesa la base de datos.
     """
-    # Paso 1: Alimentar el CRM con nuevas empresas reales (DDGS)
+    # Paso inicial: Alimentar el sistema con prospectos reales de la web
     fase_recoleccion(query_usuario)
     
-    log_web("\n--- ⚡ INICIANDO PROCESAMIENTO MULTI-HILO ---")
+    log_web("\n--- ⚡ LANZANDO MOTOR MULTI-HILO (POTENCIA 5x) ---")
     
-    # Obtenemos todas las filas actualizadas
+    # Leemos el estado actual del CRM
     filas_brutas = sheet.get_all_values()
     tareas = []
     
-    # Identificamos filas que necesitan ser procesadas (sin cualificar o cualificadas SI pero sin email/copy)
+    # Recorremos el Excel buscando filas que necesiten trabajo
     for i, f in enumerate(filas_brutas[1:], start=2):
-        # Solo procesamos si:
-        # a) No tiene decisión de cualificación
-        # b) Está cualificado como SI pero le falta el email (col 8) o el asunto (col 5)
-        if len(f) < 3 or f[2] == "" or (f[2].upper() == "SI" and (len(f) < 8 or f[7] == "" or f[4] == "")):
+        # Procesamos si:
+        # a) No ha sido cualificada (columna 3 vacía)
+        # b) Fue cualificada como SI pero le falta el email o el borrador del mensaje
+        if len(f) < 3 or f[2] == "" or (str(f[2]).upper() == "SI" and (len(f) < 8 or not f[7] or not f[4])):
             tareas.append((i, f, query_usuario, propuesta_valor))
 
-    # Ejecución en paralelo (max_workers=3 para no saturar cuotas de Gemini/Google Sheets)
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    # Al tener tarjeta, subimos a 5 hilos para máxima velocidad
+    with ThreadPoolExecutor(max_workers=5) as executor:
         resultados = list(executor.map(procesar_prospecto_individual, tareas))
 
-    log_web("\n🎉 ¡MISIÓN DE HELIOS COMPLETADA!")
+    log_web("\n🎉 ¡MISIÓN COMPLETADA! Revisa tu panel en Streamlit.")
     for res in resultados:
-        log_web(f"  > {res}")
+        print(f"  > {res}")
         
 if __name__ == "__main__":
     orquestador()
