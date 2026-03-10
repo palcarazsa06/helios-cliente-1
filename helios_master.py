@@ -74,37 +74,36 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (RASTREADOR PURO INBLOQUEABLE)
+# 🕵️ FASE 1: RECOLECCIÓN (MOTOR GOOGLE PURO)
 # ==========================================
 def fase_recoleccion(query_usuario):
     log_web(f"\n--- FASE 1: BÚSQUEDA WEB RESILIENTE: {query_usuario} ---")
     
     try:
-        import requests
-        import urllib.parse
-        import re
+        from googlesearch import search
         
-        # 1. Nos disfrazamos de navegador real de Windows
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        # 1. Preparamos la búsqueda en Google (evitando directorios con comandos avanzados)
+        query_limpia = f"{query_usuario} -site:paginasamarillas.es -site:expansion.com -site:milanuncios.com -site:habitissimo.es -directorio"
         
-        # 2. Atacamos la versión antigua de DuckDuckGo (no bloquea IPs)
-        query_limpia = f"empresas {query_usuario} -directorio -paginasamarillas"
-        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query_limpia)}"
+        # 2. Extraemos los resultados usando la librería nativa de Google
+        log_web("  🔍 Consultando a Google de forma silenciosa...")
         
-        # 3. Descargamos la web y le arrancamos el HTML
-        res = requests.get(url, headers=headers, timeout=10)
-        texto_bruto = re.sub(r'<[^>]+>', ' ', res.text)
-        texto_bruto = re.sub(r'\s+', ' ', texto_bruto)[:10000] # Nos quedamos los primeros 10000 caracteres
+        # advanced=True nos da el título, URL y la descripción de cada resultado
+        resultados = search(query_limpia, num_results=15, advanced=True, lang="es")
         
-        # 4. La IA actúa como minero de datos sobre el texto en bruto
+        texto_bruto = ""
+        for r in resultados:
+            texto_bruto += f"TITULO: {r.title}\nURL: {r.url}\nDESCRIPCION: {r.description}\n---\n"
+        
+        # 3. La IA actúa como minero de datos sobre los resultados limpios
         prompt = f"""
-        Aquí tienes el texto en bruto escaneado de internet sobre '{query_usuario}':
+        Aquí tienes los resultados de Google para '{query_usuario}':
         {texto_bruto}
         
-        Extrae el Nombre de la empresa y su URL principal.
-        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo).
-        REGLA 2: Solo extrae empresas locales reales.
-        REGLA 3: NO INVENTES NADA. Busca pistas en el texto.
+        Extrae el Nombre de la empresa real y su URL principal.
+        REGLA 1: IGNORA directorios, artículos de blog, periódicos o redes sociales.
+        REGLA 2: Solo extrae empresas locales o agencias reales que ofrezcan el servicio.
+        REGLA 3: NO inventes nada.
         REGLA 4: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
         """
         
@@ -122,18 +121,17 @@ def fase_recoleccion(query_usuario):
                 nombre, web = partes[0].strip(), partes[1].strip()
                 web = web.strip('.') 
                 
-                # 💡 FIX: Si la IA no le pone el https://, se lo ponemos nosotros
+                # Le ponemos el HTTPS si no lo trae
                 if not web.startswith("http"):
                     web = "https://" + web
                 
-                # Filtro anti-basura (ahora sin rechazar las que venían sin http)
-                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios', 'infoisinfo']):
+                # Filtro final anti-basura
+                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['facebook', 'instagram', 'linkedin', 'twitter', 'youtube']):
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
                     
         log_web(f"✅ Se han añadido {nuevas} empresas 100% REALES al CRM.")
         
-        # 💡 Si añade 0, nos chivará por qué
         if nuevas == 0:
             log_web(f"⚠️ Chivato IA: {texto}") 
             
