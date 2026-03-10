@@ -74,36 +74,41 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (MOTOR GOOGLE PURO)
+# 🕵️ FASE 1: RECOLECCIÓN (MOTOR BING ANTI-CAPTCHA)
 # ==========================================
 def fase_recoleccion(query_usuario):
     log_web(f"\n--- FASE 1: BÚSQUEDA WEB RESILIENTE: {query_usuario} ---")
     
     try:
-        from googlesearch import search
+        import requests
+        import urllib.parse
+        import re
         
-        # 1. Preparamos la búsqueda en Google (evitando directorios con comandos avanzados)
-        query_limpia = f"{query_usuario} -site:paginasamarillas.es -site:expansion.com -site:milanuncios.com -site:habitissimo.es -directorio"
+        # 1. Atacamos a Bing (es mucho más permisivo que Google con los bots)
+        query_limpia = f"{query_usuario} -site:paginasamarillas.es -site:milanuncios.com -site:habitissimo.es"
+        url = f"https://www.bing.com/search?q={urllib.parse.quote(query_limpia)}"
         
-        # 2. Extraemos los resultados usando la librería nativa de Google
-        log_web("  🔍 Consultando a Google de forma silenciosa...")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "es-ES,es;q=0.9"
+        }
         
-        # advanced=True nos da el título, URL y la descripción de cada resultado
-        resultados = search(query_limpia, num_results=15, advanced=True, lang="es")
+        log_web("  🔍 Consultando a Bing de forma silenciosa...")
+        res = requests.get(url, headers=headers, timeout=10)
         
-        texto_bruto = ""
-        for r in resultados:
-            texto_bruto += f"TITULO: {r.title}\nURL: {r.url}\nDESCRIPCION: {r.description}\n---\n"
+        # Limpiamos el código HTML para que la IA lea solo el texto útil (títulos y descripciones)
+        texto_bruto = re.sub(r'<[^>]+>', ' ', res.text)
+        texto_bruto = re.sub(r'\s+', ' ', texto_bruto)[:15000] # Cogemos los primeros 15.000 caracteres
         
-        # 3. La IA actúa como minero de datos sobre los resultados limpios
+        # 2. La IA actúa como minero de datos
         prompt = f"""
-        Aquí tienes los resultados de Google para '{query_usuario}':
+        Aquí tienes los resultados de búsqueda escaneados para '{query_usuario}':
         {texto_bruto}
         
         Extrae el Nombre de la empresa real y su URL principal.
-        REGLA 1: IGNORA directorios, artículos de blog, periódicos o redes sociales.
-        REGLA 2: Solo extrae empresas locales o agencias reales que ofrezcan el servicio.
-        REGLA 3: NO inventes nada.
+        REGLA 1: IGNORA directorios (Páginas Amarillas, Milanuncios, Habitissimo, etc) y redes sociales.
+        REGLA 2: Solo extrae empresas locales reales de los resultados.
+        REGLA 3: NO inventes nada. Busca pistas en el texto.
         REGLA 4: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
         """
         
@@ -121,12 +126,11 @@ def fase_recoleccion(query_usuario):
                 nombre, web = partes[0].strip(), partes[1].strip()
                 web = web.strip('.') 
                 
-                # Le ponemos el HTTPS si no lo trae
                 if not web.startswith("http"):
                     web = "https://" + web
                 
-                # Filtro final anti-basura
-                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['facebook', 'instagram', 'linkedin', 'twitter', 'youtube']):
+                # Filtro final para evitar basura de Microsoft o Bing
+                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['facebook', 'instagram', 'linkedin', 'twitter', 'youtube', 'bing', 'microsoft']):
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
                     
