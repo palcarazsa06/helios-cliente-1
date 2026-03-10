@@ -41,7 +41,9 @@ def conectar_bd():
             creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         else:
             creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
-            
+
+
+        cliente = gspread.authorize(creds)
         spreadsheet_id = st.secrets.get("SPREADSHEET_ID", os.getenv("SPREADSHEET_ID"))
         return cliente.open_by_key(spreadsheet_id).sheet1
         
