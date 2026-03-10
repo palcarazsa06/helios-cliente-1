@@ -134,6 +134,10 @@ if sheet:
             st.write(f"🌐 **Web:** {row['Web']}")
             st.write(f"📧 **Contacto:** {row['Email Contacto']}")
             st.info(f"🧠 **Análisis de la IA:** {row['Resumen']}")
+
+            noticias_stalkeadas = row.get('Noticias', 'Sin noticias investigadas aún.')
+            if noticias_stalkeadas and noticias_stalkeadas.strip() != "":
+                st.success(f"🕵️ **Últimas Noticias (Stalker):**\n{noticias_stalkeadas}")
             
             with st.expander("📝 Editar y Ver Borrador de Email", expanded=True):
                 asunto_editado = st.text_input("Asunto:", value=row['Asunto'])
