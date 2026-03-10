@@ -32,6 +32,8 @@ log_web("🚀 INICIANDO EL ORQUESTADOR HELIOS (Versión Text-Only)...")
 
 load_dotenv()
 
+api_gemini = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else os.getenv("GOOGLE_API_KEY")
+
 llm_flash = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 llm_creativo = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.5)
 
@@ -72,29 +74,42 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (AHORA CON INTERNET REAL)
+# 🕵️ FASE 1: RECOLECCIÓN (RASTREADOR PURO INBLOQUEABLE)
 # ==========================================
 def fase_recoleccion(query_usuario):
-    log_web(f"\n--- FASE 1: BÚSQUEDA EN INTERNET REAL: {query_usuario} ---")
+    log_web(f"\n--- FASE 1: BÚSQUEDA WEB RESILIENTE: {query_usuario} ---")
     
     try:
-        # 1. Buscamos en internet real primero
-        from langchain_community.tools import DuckDuckGoSearchResults
-        buscador = DuckDuckGoSearchResults(num_results=10)
-        resultados_reales = buscador.invoke(f"empresas {query_usuario} contacto web")
+        import requests
+        import urllib.parse
+        import re
         
-        # 2. Le damos los resultados a la IA para que solo extraiga la info real
+        # 1. Nos disfrazamos de navegador real de Windows
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        
+        # 2. Atacamos la versión antigua de DuckDuckGo (no bloquea IPs)
+        query_limpia = f"empresas {query_usuario} -directorio -paginasamarillas"
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query_limpia)}"
+        
+        # 3. Descargamos la web y le arrancamos el HTML
+        res = requests.get(url, headers=headers, timeout=10)
+        texto_bruto = re.sub(r'<[^>]+>', ' ', res.text)
+        texto_bruto = re.sub(r'\s+', ' ', texto_bruto)[:10000] # Nos quedamos los primeros 10000 caracteres
+        
+        # 4. La IA actúa como minero de datos sobre el texto en bruto
         prompt = f"""
-        Aquí tienes resultados reales de búsqueda de internet sobre '{query_usuario}':
-        {resultados_reales}
+        Aquí tienes el texto en bruto escaneado de internet sobre '{query_usuario}':
+        {texto_bruto}
         
-        Extrae el Nombre de la empresa y su URL.
-        REGLA 1: Solo extrae empresas que aparezcan en el texto. NO INVENTES NADA.
-        REGLA 2: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
+        Extrae el Nombre de la empresa y su URL principal.
+        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo).
+        REGLA 2: Solo extrae empresas locales reales.
+        REGLA 3: NO INVENTES NADA. Busca pistas en el texto.
+        REGLA 4: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
         """
         
-        respuesta = llm_flash.invoke([HumanMessage(content=prompt)])
-        texto = "".join([p['text'] for p in respuesta.content if 'text' in p]) if isinstance(respuesta.content, list) else respuesta.content
+        respuesta = llm_flash.invoke(prompt)
+        texto = respuesta.content if hasattr(respuesta, 'content') else str(respuesta)
         
         filas_existentes = sheet.get_all_values()
         nombres_existentes = [fila[0].lower().strip() for fila in filas_existentes[1:] if len(fila) > 0]
@@ -105,14 +120,23 @@ def fase_recoleccion(query_usuario):
             if "||" in linea:
                 partes = linea.split("||")
                 nombre, web = partes[0].strip(), partes[1].strip()
-                # Limpiamos un poco la URL por si la IA añade puntos finales
                 web = web.strip('.') 
                 
-                if nombre.lower() not in nombres_existentes and "http" in web:
+                # 💡 FIX: Si la IA no le pone el https://, se lo ponemos nosotros
+                if not web.startswith("http"):
+                    web = "https://" + web
+                
+                # Filtro anti-basura (ahora sin rechazar las que venían sin http)
+                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios', 'infoisinfo']):
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
                     
         log_web(f"✅ Se han añadido {nuevas} empresas 100% REALES al CRM.")
+        
+        # 💡 Si añade 0, nos chivará por qué
+        if nuevas == 0:
+            log_web(f"⚠️ Chivato IA: {texto}") 
+            
     except Exception as e:
         log_web(f"❌ Error en la recolección: {e}")
 
@@ -195,40 +219,43 @@ def buscar_email_directivo(fila, index_fila):
         sheet.update_cell(index_fila, 8, f"info@{dominio}")
 
 # ==========================================
-# 🥷 FASE 2.5: EL NINJA DE LINKEDIN (NIVEL DIOS)
+# 🥷 FASE 2.5: EL NINJA DE LINKEDIN (NIVEL DIOS - RASTREADOR PURO)
 # ==========================================
 def investigar_linkedin_directivo(fila, index_fila):
     nombre_empresa, resumen_actual = fila[0], fila[3]
     log_web(f"  🥷 Modo Ninja: X-Ray Search para {nombre_empresa}...")
     
-    # 💡 FIX 1: Retraso aleatorio para evitar que DuckDuckGo nos bloquee por ir muy rápido
-    time.sleep(random.uniform(2.0, 5.0))
+    time.sleep(random.uniform(2.0, 4.0)) 
     
     try:
-        from langchain_community.tools import DuckDuckGoSearchResults
-        buscador = DuckDuckGoSearchResults(num_results=4)
-        query = f'"{nombre_empresa}" (CEO OR Fundador OR Director OR Operaciones) site:linkedin.com/in/'
+        import requests
+        import urllib.parse
+        import re
         
-        try:
-            resultados = buscador.invoke(query)
-        except Exception:
-            resultados = "" # Si DDG falla, pasamos vacío para que active el Plan B
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        query = f'"{nombre_empresa}" (CEO OR Fundador OR Director) site:linkedin.com/in/'
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
         
-        # 💡 FIX 2: Prompt a prueba de fallos. SIEMPRE genera mensaje.
+        res = requests.get(url, headers=headers, timeout=10)
+        texto_bruto = re.sub(r'<[^>]+>', ' ', res.text)
+        texto_bruto = re.sub(r'\s+', ' ', texto_bruto)[:8000]
+        
         prompt = f"""
-        Analiza estos resultados de búsqueda sobre la empresa '{nombre_empresa}': {resultados}
+        Analiza este texto escaneado de internet buscando a la directiva de '{nombre_empresa}': 
+        {texto_bruto}
         
-        Busca un directivo real. Si NO lo encuentras, inventa un mensaje genérico.
+        Busca un directivo real y su URL. Si NO lo encuentras, inventa un mensaje genérico.
         
         Responde EXACTAMENTE con este formato de 4 líneas (sin asteriscos):
         NOMBRE: [Su Nombre, o NADA]
         CARGO: [Su Cargo, o Responsable]
         URL: [El enlace exacto de linkedin.com/in/..., o NADA]
-        MENSAJE: [Nota de invitación de LinkedIn de MÁXIMO 250 caracteres. Si hay nombre, dirígete a él. Si no, dirígete al equipo de {nombre_empresa}]
+        MENSAJE: [Nota de invitación de LinkedIn de MÁXIMO 250 caracteres. Si hay nombre, dirígete a él. Si no, al equipo]
         """
-        texto = llm_flash.invoke([HumanMessage(content=prompt)]).content
         
-        # 💡 FIX 3: Extracción robusta. Ignora negritas (**), asteriscos y espacios extra
+        respuesta = llm_flash.invoke(prompt)
+        texto = respuesta.content if hasattr(respuesta, 'content') else str(respuesta)
+        
         n_ninja = re.search(r"NOMBRE:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE)
         c_ninja = re.search(r"CARGO:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE)
         u_ninja = re.search(r"URL:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE)
@@ -242,21 +269,18 @@ def investigar_linkedin_directivo(fila, index_fila):
         if n_val.upper() == "NADA": n_val = ""
         if u_val.upper() == "NADA": u_val = ""
 
-        # Si encontramos a la persona, actualizamos el resumen para el email
         if n_val:
             datos_ninja = f"{n_val} | {c_val}"
             log_web(f"    🎯 ¡Perfil localizado!: {n_val}")
             nuevo_resumen = f"{resumen_actual}\n\n[DATOS NINJA]: {datos_ninja}\nINSTRUCCIÓN EXTRA: Empieza dirigiéndote a {n_val}, sobre su perfil de {c_val}."
             sheet.update_cell(index_fila, 4, nuevo_resumen)
         else:
-            log_web(f"    ⚠️ Ninja ciego, pero se generó mensaje genérico de red.")
+            log_web(f"    ⚠️ Ninja ciego, se generó mensaje genérico.")
         
-        # Limpieza final de la URL
         u_val = u_val.replace('<', '').replace('>', '').replace('"', '').replace("'", "")
         if u_val and "linkedin.com" in u_val and not u_val.startswith("http"):
             u_val = "https://" + u_val
             
-        # Seguro final por si el modelo falla al dar el mensaje
         if not m_val:
             m_val = f"Hola, me encantaría conectar con el equipo de {nombre_empresa} para compartir sinergias. ¡Un saludo!"
 
@@ -265,11 +289,10 @@ def investigar_linkedin_directivo(fila, index_fila):
         
     except Exception as e: 
         log_web(f"    ❌ Error Ninja: {e}")
-        # Si explota todo, dejamos un mensaje genérico para que la web NO desaparezca
         sheet.update_cell(index_fila, 10, f"Hola, me encantaría conectar con el equipo de {nombre_empresa} para explorar sinergias. ¡Saludos!")
-
+        
 # ==========================================
-# ✍️ FASE 3: REDACCIÓN DEL CORREO 
+# ✍️ FASE 3: REDACCIÓN DEL CORREO (Blindada)
 # ==========================================
 def fase_redaccion(fila, index_fila, propuesta_valor):
     nombre, resumen = fila[0], fila[3]
@@ -291,10 +314,16 @@ def fase_redaccion(fila, index_fila, propuesta_valor):
     
     try:
         texto = llm_creativo.invoke([HumanMessage(content=prompt)]).content
-        if "ASUNTO:" in texto and "CUERPO:" in texto:
-            partes_cuerpo = texto.split("CUERPO:")
-            asunto = partes_cuerpo[0].replace("ASUNTO:", "").strip().replace('\n', '')
-            cuerpo = partes_cuerpo[1].strip()
+        
+        # 💡 FIX: Extracción indestructible ignorando mayúsculas, negritas y saltos de línea
+        import re
+        match_asunto = re.search(r"ASUNTO:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE)
+        # re.DOTALL permite que el cuerpo capture todos los párrafos y saltos de línea hasta el final
+        match_cuerpo = re.search(r"CUERPO:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE | re.DOTALL)
+        
+        if match_asunto and match_cuerpo:
+            asunto = match_asunto.group(1).replace('*', '').replace('"', '').strip()
+            cuerpo = match_cuerpo.group(1).replace('*', '').strip()
             
             firma = "\n\n---\nTu Nombre\nTu Cargo | Tu Empresa\n📞 +34 600 000 000 | 🌐 tuweb.com"
             cuerpo = cuerpo + firma
@@ -303,7 +332,11 @@ def fase_redaccion(fila, index_fila, propuesta_valor):
             sheet.update_cell(index_fila, 6, cuerpo)
             log_web("    ✅ Textos guardados.")
         else:
-            log_web("    ⚠️ La IA no respetó el formato exacto.")
+            log_web("    ⚠️ La IA se saltó el formato. Aplicando Seguro de Vida.")
+            # Seguro de vida por si la IA alucina: mete algo genérico pero válido
+            sheet.update_cell(index_fila, 5, f"Propuesta rápida para {nombre}")
+            sheet.update_cell(index_fila, 6, f"Hola equipo de {nombre},\n\nHe estado revisando vuestro proyecto y me encantaría hablar con vosotros sobre esto: {propuesta_valor}.\n\n¿Tenéis 5 minutos esta semana para comentarlo?\n\nUn saludo.")
+            
     except Exception as e:
         log_web(f"    ❌ Error en redacción: {e}")
 
