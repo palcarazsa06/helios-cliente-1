@@ -6,8 +6,7 @@ pandas
 python-dotenv
 requests
 PyPDF2
-playwright
+beautifulsoup4
 langchain-google-genai
 langchain-core
 langchain-community
-googlesearch-python
