@@ -292,7 +292,7 @@ def investigar_linkedin_directivo(fila, index_fila):
         sheet.update_cell(index_fila, 10, f"Hola, me encantaría conectar con el equipo de {nombre_empresa} para explorar sinergias. ¡Saludos!")
         
 # ==========================================
-# ✍️ FASE 3: REDACCIÓN DEL CORREO 
+# ✍️ FASE 3: REDACCIÓN DEL CORREO (Blindada)
 # ==========================================
 def fase_redaccion(fila, index_fila, propuesta_valor):
     nombre, resumen = fila[0], fila[3]
@@ -314,10 +314,16 @@ def fase_redaccion(fila, index_fila, propuesta_valor):
     
     try:
         texto = llm_creativo.invoke([HumanMessage(content=prompt)]).content
-        if "ASUNTO:" in texto and "CUERPO:" in texto:
-            partes_cuerpo = texto.split("CUERPO:")
-            asunto = partes_cuerpo[0].replace("ASUNTO:", "").strip().replace('\n', '')
-            cuerpo = partes_cuerpo[1].strip()
+        
+        # 💡 FIX: Extracción indestructible ignorando mayúsculas, negritas y saltos de línea
+        import re
+        match_asunto = re.search(r"ASUNTO:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE)
+        # re.DOTALL permite que el cuerpo capture todos los párrafos y saltos de línea hasta el final
+        match_cuerpo = re.search(r"CUERPO:\s*\*?\*?\s*(.*)", texto, re.IGNORECASE | re.DOTALL)
+        
+        if match_asunto and match_cuerpo:
+            asunto = match_asunto.group(1).replace('*', '').replace('"', '').strip()
+            cuerpo = match_cuerpo.group(1).replace('*', '').strip()
             
             firma = "\n\n---\nTu Nombre\nTu Cargo | Tu Empresa\n📞 +34 600 000 000 | 🌐 tuweb.com"
             cuerpo = cuerpo + firma
@@ -326,7 +332,11 @@ def fase_redaccion(fila, index_fila, propuesta_valor):
             sheet.update_cell(index_fila, 6, cuerpo)
             log_web("    ✅ Textos guardados.")
         else:
-            log_web("    ⚠️ La IA no respetó el formato exacto.")
+            log_web("    ⚠️ La IA se saltó el formato. Aplicando Seguro de Vida.")
+            # Seguro de vida por si la IA alucina: mete algo genérico pero válido
+            sheet.update_cell(index_fila, 5, f"Propuesta rápida para {nombre}")
+            sheet.update_cell(index_fila, 6, f"Hola equipo de {nombre},\n\nHe estado revisando vuestro proyecto y me encantaría hablar con vosotros sobre esto: {propuesta_valor}.\n\n¿Tenéis 5 minutos esta semana para comentarlo?\n\nUn saludo.")
+            
     except Exception as e:
         log_web(f"    ❌ Error en redacción: {e}")
 
