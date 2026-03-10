@@ -14,13 +14,12 @@ from dotenv import load_dotenv
 from oauth2client.service_account import ServiceAccountCredentials
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
-from playwright.sync_api import sync_playwright
+from bs4 import BeautifulSoup  # 💡 Mucho más ligero para la nube
+from duckduckgo_search import DDGS # 💡 API interna sin bloqueos
 from concurrent.futures import ThreadPoolExecutor
 
-os.system("playwright install chromium")
-
 # ==========================================
-# 📜 SISTEMA DE LOGS (Consola Web)
+# 📜 SISTEMA DE LOGS
 # ==========================================
 def log_web(mensaje):
     with open("helios.log", "a", encoding="utf-8") as f:
@@ -28,174 +27,106 @@ def log_web(mensaje):
     print(mensaje)
 
 open("helios.log", "w").close() 
-log_web("🚀 INICIANDO EL ORQUESTADOR HELIOS (Versión Text-Only)...")
+log_web("🚀 HELIOS OS: Versión Cloud-Native Optimizada...")
 
 load_dotenv()
 
-api_gemini = st.secrets["GOOGLE_API_KEY"] if "GOOGLE_API_KEY" in st.secrets else os.getenv("GOOGLE_API_KEY")
-
+# Configuración de LLM
 llm_flash = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
 llm_creativo = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.5)
 
-# 💡 FIX 1: Faltaba definir los permisos (scope) que necesita Google
 scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
 
-# --- NUEVA CONEXIÓN PARA LA NUBE ---
 def conectar_google_sheets_nube():
-    # Intentamos leer las credenciales desde los Secrets de Streamlit
     creds_dict = st.secrets["gcp_service_account"]
-    
-    # Creamos las credenciales directamente desde el diccionario (sin archivo .json)
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     return gspread.authorize(creds)
 
-log_web("1. ☁️ Conectando a la base de datos en la nube...")
-
-# 💡 FIX 2: Inicializamos 'sheet' vacía para que no dé NameError si la conexión falla
-sheet = None 
-
 try:
-    # Intenta primero el modo nube, si falla (porque estás en local), usa el archivo
     if "gcp_service_account" in st.secrets:
         cliente = conectar_google_sheets_nube()
     else:
-        # Tu código antiguo para cuando trabajes en tu ordenador
         creds = ServiceAccountCredentials.from_json_keyfile_name('credenciales.json', scope)
         cliente = gspread.authorize(creds)
-        
+    
+    # Usamos el ID de tu v1.0 que sabemos que funciona
     sheet = cliente.open_by_key("1w6ug2YFj1wpMFNwCgS2sqewUmG_4m9RIMe2x2w3Bkm4").sheet1
 except Exception as e:
-    log_web(f"❌ Error crítico de conexión: {e}")
-
-# 💡 FIX 3: Solo intentamos poner cabeceras si la conexión fue exitosa
-if sheet:
-    cabeceras = ["Nombre", "Web", "Cualificado", "Resumen", "Asunto", "Cuerpo", "Enviado", "Email Contacto", "Prompt Imagen", "Mensaje LinkedIn", "URL LinkedIn"]
-    if not sheet.row_values(1):
-        sheet.append_row(cabeceras)
+    log_web(f"❌ Error de conexión: {e}")
+    sheet = None
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (RASTREADOR PURO INBLOQUEABLE)
+# 🕵️ FASE 1: RECOLECCIÓN (Usando DDGS)
 # ==========================================
 def fase_recoleccion(query_usuario):
-    log_web(f"\n--- FASE 1: BÚSQUEDA WEB RESILIENTE: {query_usuario} ---")
-    
+    log_web(f"\n--- FASE 1: RASTREO REAL CON DDGS: {query_usuario} ---")
+    nuevas = 0
     try:
-        import requests
-        import urllib.parse
-        import re
-        
-        # 1. Nos disfrazamos de navegador real de Windows
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
-        
-        # 2. Atacamos la versión antigua de DuckDuckGo (no bloquea IPs)
-        query_limpia = f"empresas {query_usuario} -directorio -paginasamarillas"
-        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query_limpia)}"
-        
-        # 3. Descargamos la web y le arrancamos el HTML
-        res = requests.get(url, headers=headers, timeout=10)
-        texto_bruto = re.sub(r'<[^>]+>', ' ', res.text)
-        texto_bruto = re.sub(r'\s+', ' ', texto_bruto)[:10000] # Nos quedamos los primeros 10000 caracteres
-        
-        # 4. La IA actúa como minero de datos sobre el texto en bruto
-        prompt = f"""
-        Aquí tienes el texto en bruto escaneado de internet sobre '{query_usuario}':
-        {texto_bruto}
-        
-        Extrae el Nombre de la empresa y su URL principal.
-        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo).
-        REGLA 2: Solo extrae empresas locales reales.
-        REGLA 3: NO INVENTES NADA. Busca pistas en el texto.
-        REGLA 4: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
-        """
-        
-        respuesta = llm_flash.invoke(prompt)
-        texto = respuesta.content if hasattr(respuesta, 'content') else str(respuesta)
-        
-        filas_existentes = sheet.get_all_values()
-        nombres_existentes = [fila[0].lower().strip() for fila in filas_existentes[1:] if len(fila) > 0]
-        
-        nuevas = 0
-        for linea in texto.split('\n'):
-            linea = linea.strip()
-            if "||" in linea:
-                partes = linea.split("||")
-                nombre, web = partes[0].strip(), partes[1].strip()
-                web = web.strip('.') 
+        with DDGS() as ddgs:
+            # Buscamos empresas reales, evitando directorios basura
+            query_limpia = f"{query_usuario} -site:paginasamarillas.es -site:habitissimo.es -site:milanuncios.com"
+            resultados = list(ddgs.text(query_limpia, max_results=10))
+            
+            filas_existentes = sheet.get_all_values()
+            nombres_existentes = [fila[0].lower().strip() for fila in filas_existentes[1:] if len(fila) > 0]
+
+            for r in resultados:
+                nombre = r['title'].split("-")[0].strip()
+                url = r['href']
                 
-                # 💡 FIX: Si la IA no le pone el https://, se lo ponemos nosotros
-                if not web.startswith("http"):
-                    web = "https://" + web
-                
-                # Filtro anti-basura (ahora sin rechazar las que venían sin http)
-                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios', 'infoisinfo']):
-                    sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
+                if nombre.lower() not in nombres_existentes:
+                    sheet.append_row([nombre, url, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
-                    
-        log_web(f"✅ Se han añadido {nuevas} empresas 100% REALES al CRM.")
-        
-        # 💡 Si añade 0, nos chivará por qué
-        if nuevas == 0:
-            log_web(f"⚠️ Chivato IA: {texto}") 
-            
+        log_web(f"✅ ¡Éxito! {nuevas} prospectos reales añadidos.")
     except Exception as e:
-        log_web(f"❌ Error en la recolección: {e}")
+        log_web(f"❌ Error DDGS: {e}")
 
 # ==========================================
-# 🔬 FASE 2: CUALIFICACIÓN Y EXTRACCIÓN
+# 🔬 FASE 2: CUALIFICACIÓN (BS4 + Requests)
 # ==========================================
-def extraer_texto_pdf(url_pdf):
+def extraer_ligero(url):
+    """Extrae texto sin necesidad de Playwright"""
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        respuesta = requests.get(url_pdf, headers=headers, timeout=10)
-        archivo_pdf = io.BytesIO(respuesta.content)
-        lector = PyPDF2.PdfReader(archivo_pdf)
-        texto_pdf = ""
-        for i in range(min(3, len(lector.pages))):
-            texto_pdf += lector.pages[i].extract_text() + "\n"
-        return texto_pdf
-    except Exception as e: return ""
-
-def extraer_con_playwright(url):
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            page = context.new_page()
-            page.goto(url, wait_until="networkidle", timeout=20000)
-            texto_web = page.inner_text("body")
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        res = requests.get(url, headers=headers, timeout=10)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        # Limpiamos scripts y estilos
+        for script in soup(["script", "style"]):
+            script.decompose()
             
-            enlaces = page.locator("a").element_handles()
-            link_pdf = None
-            for enlace in enlaces:
-                href = enlace.get_attribute("href")
-                if href and ".pdf" in href.lower():
-                    link_pdf = urljoin(url, href)
-                    break
-            browser.close()
-            texto_pdf = extraer_texto_pdf(link_pdf) if link_pdf else ""
-            return f"TEXTO WEB:\n{texto_web}\n\nPOSIBLES PROYECTOS (PDF):\n{texto_pdf}"[:6000]
-    except Exception as e: return f"Error de acceso: {e}"
+        texto = soup.get_text(separator=' ')
+        return " ".join(texto.split())[:5000] # Limite para Gemini
+    except Exception as e:
+        return f"Error leyendo web: {e}"
 
 def fase_cualificacion(fila, index, query_usuario, propuesta_valor):
-    log_web(f"  🔍 Auditando web de {fila[0]}...")
-    contexto = extraer_con_playwright(fila[1])
+    log_web(f"  🔍 Analizando {fila[0]}...")
+    contexto = extraer_ligero(fila[1])
     
-    # 💡 FIX: El prompt ahora evalúa si son buenos clientes para LO QUE VENDES
-    prompt = f"""Actúa como auditor B2B. Texto web extraído: {contexto}
-    Buscamos empresas con este perfil: '{query_usuario}'.
-    Nuestro objetivo es ofrecerles esto: '{propuesta_valor}'.
+    prompt = f"""Analiza esta empresa para una campaña B2B.
+    Web: {fila[1]}
+    Contenido extraído: {contexto}
     
-    ¿La empresa '{fila[0]}' es un buen cliente potencial para esta oferta? Responde EXACTAMENTE:
+    Buscamos: {query_usuario}
+    Ofrecemos: {propuesta_valor}
+    
+    ¿Es un prospecto válido? Responde:
     CUALIFICADO: [SI/NO]
-    RESUMEN: [Máximo 30 palabras justificando por qué les serviría nuestra oferta]"""
+    RESUMEN: [Por qué encaja en 25 palabras]"""
     
-    res = llm_flash.invoke([HumanMessage(content=prompt)]).content
-    c, r = "NO", "Sin datos"
-    for l in res.split('\n'):
-        if "CUALIFICADO:" in l: c = l.split(":")[1].strip()
-        if "RESUMEN:" in l: r = l.split(":")[1].strip()
-    sheet.update_cell(index, 3, c)
-    sheet.update_cell(index, 4, r)
+    try:
+        res = llm_flash.invoke([HumanMessage(content=prompt)]).content
+        c = "SI" if "CUALIFICADO: SI" in res.upper() else "NO"
+        # Extracción simple del resumen
+        r = res.split("RESUMEN:")[1].strip() if "RESUMEN:" in res else "Sin resumen"
+        
+        sheet.update_cell(index, 3, c)
+        sheet.update_cell(index, 4, r)
+    except:
+        sheet.update_cell(index, 3, "NO")
+        sheet.update_cell(index, 4, "Error en análisis")
 
 # ==========================================
 # 🎯 FASE 2.5: HUNTER & LINKEDIN
