@@ -74,43 +74,52 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (VERSIÓN CLÁSICA ESTABLE - DUCK LITE)
+# 🕵️ FASE 1: RECOLECCIÓN (NAVEGADOR FANTASMA CON PLAYWRIGHT)
 # ==========================================
 def fase_recoleccion(query_usuario):
     log_web(f"\n--- FASE 1: BÚSQUEDA WEB RESILIENTE: {query_usuario} ---")
     
     try:
-        import requests
         import urllib.parse
-        import re
         import time
+        from playwright.sync_api import sync_playwright
         
-        # Pausa táctica de 2 segundos para que no nos detecten como metralleta
-        time.sleep(2)
-        
-        # Nos disfrazamos de navegador real
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         query_limpia = f"empresas {query_usuario} -directorio -paginasamarillas"
+        # Usamos el DuckDuckGo principal, el moderno
+        url = f"https://duckduckgo.com/?q={urllib.parse.quote(query_limpia)}&kl=es-es"
         
-        log_web("  🔍 Rastreador clásico activado...")
+        log_web("  🔍 Desplegando Navegador Fantasma para evadir radares...")
         
-        # VOLVEMOS AL ORIGINAL: Pero usando la versión 'Lite' por método POST (inbloqueable)
-        url = "https://lite.duckduckgo.com/lite/"
-        data = {'q': query_limpia, 'kl': 'es-es'}
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            # Nos disfrazamos con una pantalla y navegador estándar
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                viewport={'width': 1280, 'height': 720}
+            )
+            page = context.new_page()
+            
+            # Vamos a la web y esperamos a que cargue del todo
+            page.goto(url, wait_until="networkidle", timeout=20000)
+            
+            # Truco ninja: Hacemos un pequeño scroll simulando ser humanos
+            page.mouse.wheel(0, 1000)
+            time.sleep(2)
+            
+            # Extraemos TODO el texto visible de la página
+            texto_bruto = page.inner_text("body")
+            browser.close()
         
-        res = requests.post(url, headers=headers, data=data, timeout=10)
+        # Nos quedamos con los primeros 15.000 caracteres (de sobra para los primeros 10 resultados)
+        texto_bruto = texto_bruto[:15000]
         
-        # Limpiamos el HTML para dejarle a la IA solo el texto puro
-        texto_bruto = re.sub(r'<[^>]+>', ' ', res.text)
-        texto_bruto = re.sub(r'\s+', ' ', texto_bruto)[:10000] 
-        
-        # La IA actúa como minero de datos (Tu prompt original)
+        # La IA actúa como minero de datos
         prompt = f"""
         Aquí tienes el texto en bruto escaneado de internet sobre '{query_usuario}':
         {texto_bruto}
         
         Extrae el Nombre de la empresa y su URL principal.
-        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo).
+        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo, etc).
         REGLA 2: Solo extrae empresas locales reales.
         REGLA 3: NO INVENTES NADA. Busca pistas en el texto.
         REGLA 4: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
@@ -133,7 +142,7 @@ def fase_recoleccion(query_usuario):
                 if not web.startswith("http"):
                     web = "https://" + web
                 
-                # Tu filtro anti-basura original
+                # Filtro anti-basura
                 if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios', 'infoisinfo']):
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
