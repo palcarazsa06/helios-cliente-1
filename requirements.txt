@@ -5,9 +5,9 @@ google-auth
 pandas
 python-dotenv
 requests
+beautifulsoup4
 PyPDF2
-playwright
+duckduckgo-search
 langchain-google-genai
 langchain-core
 langchain-community
-googlesearch-python
