@@ -108,6 +108,26 @@ def fase_recoleccion(query_usuario):
     except Exception as e:
         log_web(f"❌ Error al escribir en Google Sheets: {e}")
 
+def fase_noticias(nombre_empresa):
+    """
+    Busca hitos, noticias o expansiones recientes de la empresa.
+    """
+    log_web(f"  🕵️ Investigando actualidad de {nombre_empresa}...")
+    contexto_noticias = ""
+    try:
+        with DDGS() as ddgs:
+            # Buscamos noticias, inversiones o aperturas
+            query_news = f'"{nombre_empresa}" noticia expansión apertura inversión 2024 2025'
+            res = list(ddgs.text(query_news, max_results=3))
+            
+            for r in res:
+                contexto_noticias += f"- {r['title']}: {r['body']}\n"
+        
+        return contexto_noticias if contexto_noticias else "Sin noticias recientes destacadas."
+    except Exception as e:
+        log_web(f"    ⚠️ Error buscando noticias: {e}")
+        return "Sin noticias recientes."
+
 # ==========================================
 # 🔬 FASE 2: CUALIFICACIÓN (BS4 + Requests)
 # ==========================================
@@ -257,21 +277,25 @@ def investigar_linkedin_directivo(fila, index_fila):
 # ✍️ FASE 3: REDACCIÓN DEL CORREO (Blindada)
 # ==========================================
 def fase_redaccion(fila, index_fila, propuesta_valor):
-    nombre, resumen = fila[0], fila[3]
-    log_web(f"  ✍️ Redactando email para {nombre}...")
+    nombre, resumen, noticias = fila[0], fila[3], fila[11] # 💡 noticias es la col 12
+    log_web(f"  ✍️ Redactando email hiper-personalizado para {nombre}...")
     
-    # 💡 FIX: El copywriter ahora sabe exactamente qué tiene que vender
     prompt = f"""
-    Eres un experto copywriter B2B. Tu cliente objetivo es la empresa: {nombre}. 
-    Contexto de la empresa: {resumen}
+    Eres un experto en Growth Engineering. Escribe un correo de puerta fría para {nombre}.
     
-    Lo que queremos venderles/ofrecerles es lo siguiente: {propuesta_valor}
+    CONTEXTO DE LA EMPRESA: {resumen}
+    ACTUALIDAD/NOTICIAS RECIENTES: {noticias}
+    NUESTRA OFERTA: {propuesta_valor}
     
-    Escribe un correo corto y persuasivo de puerta fría ofreciendo nuestra solución. Ve al grano, sin saludos robóticos.
+    REGLAS DE ORO:
+    1. Si hay una noticia real en el campo ACTUALIDAD, úsala como gancho inicial para felicitarles o mencionar que estás al tanto de su crecimiento.
+    2. Si no hay noticias relevantes, usa un dato específico de su web mencionado en el CONTEXTO.
+    3. NO uses saludos robóticos como "Espero que este email te encuentre bien".
+    4. Sé directo, breve y enfocado en el beneficio mutuo.
     
-    Formato EXACTO de respuesta:
-    ASUNTO: [Asunto corto que genere curiosidad]
-    CUERPO: [Cuerpo del correo]
+    FORMATO:
+    ASUNTO: [Asunto]
+    CUERPO: [Cuerpo]
     """
     
     try:
@@ -339,54 +363,37 @@ def enviar_correo_manual(nombre_empresa, nuevo_asunto=None, nuevo_cuerpo=None):
 # 🧠 PROCESAMIENTO DE UNA FILA ÚNICA (NIVEL ELITE)
 # ==========================================
 def procesar_prospecto_individual(datos_proceso):
-    """
-    Gestiona el ciclo de vida completo de un prospecto en Helios OS.
-    """
-    # Desempaquetamos los datos de la misión
     index, fila, query_usuario, propuesta_valor = datos_proceso
-    
-    # Rellenar columnas faltantes para evitar errores de índice
-    while len(fila) < 11: fila.append("")
+    while len(fila) < 12: fila.append("") # 💡 Subimos a 12 columnas para la nueva info
     
     try:
-        # 1. FASE DE CUALIFICACIÓN (Auditoría con BeautifulSoup)
-        # Solo se ejecuta si la celda 'Cualificado' está vacía o tiene error
+        # 1. CUALIFICACIÓN (Ya la tenemos)
         if fila[2] == "" or "ERROR" in str(fila[2]).upper():
             fase_cualificacion(fila, index, query_usuario, propuesta_valor)
-            fila = sheet.row_values(index) # Refresco post-escritura
+            fila = sheet.row_values(index) 
         
-        # Si la IA descarta la empresa, terminamos el proceso para esta fila
         if str(fila[2]).upper() != "SI":
             return f"Fin: {fila[0]} (No cualificado)"
 
-        # Aseguramos longitud de fila para fases de datos
-        while len(fila) < 11: fila.append("")
+        # 2. 🕵️ NUEVO: INVESTIGACIÓN DE ACTUALIDAD (Punto 1)
+        # Solo lo hacemos si la columna de noticias (columna 12) está vacía
+        if not fila[11] or fila[11] == "":
+            noticias = fase_noticias(fila[0])
+            sheet.update_cell(index, 12, noticias)
+            fila[11] = noticias # Lo guardamos en memoria para la redacción
 
-        # 2. BÚSQUEDA DE EMAIL (Hunter API)
-        if not fila[7] or fila[7] == "":
-            buscar_email_directivo(fila, index)
-            fila = sheet.row_values(index)
-            
-        # 3. MODO NINJA (Investigación en LinkedIn)
-        # Se activa si no hemos encontrado al directivo todavía
-        while len(fila) < 11: fila.append("")
-        if "[DATOS NINJA]" not in str(fila[3]):
-            investigar_linkedin_directivo(fila, index)
-            fila = sheet.row_values(index)
+        # 3. EMAIL & LINKEDIN (Ya los tenemos)
+        if not fila[7]: buscar_email_directivo(fila, index); fila = sheet.row_values(index)
+        if "[DATOS NINJA]" not in str(fila[3]): investigar_linkedin_directivo(fila, index); fila = sheet.row_values(index)
 
-        # 4. REDACCIÓN DE EMAIL (Copywriting Persuasi-IA)
-        # Solo si no existe ya un borrador (Asunto en columna 5)
-        while len(fila) < 11: fila.append("")
-        if not fila[4] or fila[4] == "":
+        # 4. REDACCIÓN PERSONALIZADA (Modificada abajo)
+        if not fila[4]: 
             fase_redaccion(fila, index, propuesta_valor)
-            fila = sheet.row_values(index)
 
-        return f"Éxito: {fila[0]} listo para envío."
-
+        return f"Éxito: {fila[0]} stalkeado y procesado."
     except Exception as e:
-        log_web(f"❌ Error crítico en {fila[0]}: {e}")
-        return f"Error: {fila[0]}"
-
+        return f"Error: {e}"
+        
 # ==========================================
 # 🚀 EL ORQUESTADOR HELIOS (POTENCIA MÁXIMA)
 # ==========================================
