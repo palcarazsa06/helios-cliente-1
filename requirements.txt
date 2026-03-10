@@ -10,3 +10,4 @@ beautifulsoup4
 langchain-google-genai
 langchain-core
 langchain-community
+duckduckgo-search
