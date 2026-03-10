@@ -125,59 +125,43 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (MOTOR DUCK HTML + BEAUTIFULSOUP)
+# 🕵️ FASE 1: RECOLECCIÓN (LIBRERÍA DDGS - ANTI-BLOQUEOS)
 # ==========================================
 def fase_recoleccion(query_usuario):
     log_web(f"\n--- FASE 1: BÚSQUEDA WEB RESILIENTE: {query_usuario} ---")
     
     try:
-        import requests
-        import urllib.parse
-        import time
-        from bs4 import BeautifulSoup
+        # Importamos la librería que hemos metido en requirements.txt
+        from duckduckgo_search import DDGS
         
-        # Pausa táctica
-        time.sleep(2)
+        query_limpia = f"{query_usuario} instaladores -directorio -paginasamarillas"
+        log_web("  🔍 Rastreador API activado (Cero bloqueos)...")
         
-        # Nos disfrazamos de navegador Firefox estándar
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/111.0",
-            "Content-Type": "application/x-www-form-urlencoded"
-        }
-        
-        query_limpia = f"empresas {query_usuario} -directorio -paginasamarillas"
-        
-        log_web("  🔍 Rastreador táctico activado (DuckDuckGo HTML)...")
-        
-        # Usamos POST a la versión HTML cruda de Duck (inmune a muros de cookies)
-        url = "https://html.duckduckgo.com/html/"
-        data = {'q': query_limpia, 'kl': 'es-es'}
-        
-        res = requests.post(url, headers=headers, data=data, timeout=15)
-        
-        # El bisturí de BeautifulSoup: limpiamos todo el código y nos quedamos solo el texto visible
-        soup = BeautifulSoup(res.text, 'html.parser')
-        
-        for script in soup(["script", "style", "noscript", "header", "footer"]):
-            script.extract()
+        # 1. Obtenemos los datos directamente de la API interna de DuckDuckGo
+        resultados_texto = ""
+        with DDGS() as ddgs:
+            # Pedimos 10 resultados de España de forma sigilosa
+            resultados = list(ddgs.text(query_limpia, region='es-es', max_results=10))
             
-        texto_bruto = soup.get_text(separator=' ', strip=True)[:10000] 
-        
-        # La IA actúa como minero de datos
+            for r in resultados:
+                resultados_texto += f"TÍTULO: {r.get('title')}\nURL: {r.get('href')}\nDESCRIPCIÓN: {r.get('body')}\n---\n"
+                
+        # 2. Le pasamos este texto limpio a Gemini (sin HTML, sin CSS, sin cookies)
         prompt = f"""
-        Aquí tienes el texto en bruto escaneado de internet sobre '{query_usuario}':
-        {texto_bruto}
+        Aquí tienes resultados de búsqueda 100% limpios sobre '{query_usuario}':
+        {resultados_texto}
         
         Extrae el Nombre de la empresa y su URL principal.
-        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo).
+        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo, etc).
         REGLA 2: Solo extrae empresas locales reales.
-        REGLA 3: NO INVENTES NADA. Busca pistas en el texto.
+        REGLA 3: NO INVENTES NADA.
         REGLA 4: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
         """
         
         respuesta = llm_flash.invoke(prompt)
         texto = respuesta.content if hasattr(respuesta, 'content') else str(respuesta)
         
+        # 3. Guardamos en el Excel
         filas_existentes = sheet.get_all_values()
         nombres_existentes = [fila[0].lower().strip() for fila in filas_existentes[1:] if len(fila) > 0]
         
@@ -192,8 +176,8 @@ def fase_recoleccion(query_usuario):
                 if not web.startswith("http"):
                     web = "https://" + web
                 
-                # Tu filtro anti-basura original
-                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios', 'infoisinfo']):
+                # Filtro anti-basura
+                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios']):
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
                     
