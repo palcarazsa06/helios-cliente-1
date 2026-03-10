@@ -62,32 +62,51 @@ if sheet:
         sheet.append_row(cabeceras)
 
 # ==========================================
-# 🕵️ FASE 1: RECOLECCIÓN (MOTOR YAHOO)
+# 🕵️ FASE 1: RECOLECCIÓN (MOTOR DUCK HTML + BEAUTIFULSOUP)
 # ==========================================
 def fase_recoleccion(query_usuario):
     log_web(f"\n--- FASE 1: BÚSQUEDA WEB RESILIENTE: {query_usuario} ---")
+    
     try:
+        import requests
+        import urllib.parse
+        import time
+        from bs4 import BeautifulSoup
+        
+        # Pausa táctica
         time.sleep(2)
+        
+        # Nos disfrazamos de navegador Firefox estándar
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept-Language": "es-ES,es;q=0.9"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/111.0",
+            "Content-Type": "application/x-www-form-urlencoded"
         }
         
         query_limpia = f"empresas {query_usuario} -directorio -paginasamarillas"
-        log_web("  🔍 Rastreador básico activado (Motor: Yahoo)...")
         
-        url = f"https://es.search.yahoo.com/search?p={urllib.parse.quote(query_limpia)}"
-        res = requests.get(url, headers=headers, timeout=10)
+        log_web("  🔍 Rastreador táctico activado (DuckDuckGo HTML)...")
         
-        texto_bruto = re.sub(r'<[^>]+>', ' ', res.text)
-        texto_bruto = re.sub(r'\s+', ' ', texto_bruto)[:12000] 
+        # Usamos POST a la versión HTML cruda de Duck (inmune a muros de cookies)
+        url = "https://html.duckduckgo.com/html/"
+        data = {'q': query_limpia, 'kl': 'es-es'}
         
+        res = requests.post(url, headers=headers, data=data, timeout=15)
+        
+        # El bisturí de BeautifulSoup: limpiamos todo el código y nos quedamos solo el texto visible
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        for script in soup(["script", "style", "noscript", "header", "footer"]):
+            script.extract()
+            
+        texto_bruto = soup.get_text(separator=' ', strip=True)[:10000] 
+        
+        # La IA actúa como minero de datos
         prompt = f"""
         Aquí tienes el texto en bruto escaneado de internet sobre '{query_usuario}':
         {texto_bruto}
         
         Extrae el Nombre de la empresa y su URL principal.
-        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo, Yahoo).
+        REGLA 1: IGNORA directorios (Expansión, Páginas Amarillas, Milanuncios, Habitissimo).
         REGLA 2: Solo extrae empresas locales reales.
         REGLA 3: NO INVENTES NADA. Busca pistas en el texto.
         REGLA 4: Devuelve SOLO Nombre||URL (una empresa por línea). Máximo 5.
@@ -106,16 +125,22 @@ def fase_recoleccion(query_usuario):
                 partes = linea.split("||")
                 nombre, web = partes[0].strip(), partes[1].strip()
                 web = web.strip('.') 
+                
                 if not web.startswith("http"):
                     web = "https://" + web
                 
-                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios', 'infoisinfo', 'yahoo']):
+                # Tu filtro anti-basura original
+                if nombre.lower() not in nombres_existentes and not any(b in web.lower() for b in ['expansion', 'eleconomista', 'paginasamarillas', 'habitissimo', 'milanuncios', 'infoisinfo']):
                     sheet.append_row([nombre, web, "", "", "", "", "", "", "", "", ""])
                     nuevas += 1
                     
         log_web(f"✅ Se han añadido {nuevas} empresas 100% REALES al CRM.")
-        if nuevas == 0: log_web(f"⚠️ Chivato IA: {texto}") 
-    except Exception as e: log_web(f"❌ Error en la recolección: {e}")
+        
+        if nuevas == 0:
+            log_web(f"⚠️ Chivato IA: {texto}") 
+            
+    except Exception as e:
+        log_web(f"❌ Error en la recolección: {e}")
 
 # ==========================================
 # 🔬 FASE 2: CUALIFICACIÓN Y EXTRACCIÓN (LIGERA)
