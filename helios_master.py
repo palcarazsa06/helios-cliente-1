@@ -305,64 +305,87 @@ def enviar_correo_manual(nombre_empresa, nuevo_asunto=None, nuevo_cuerpo=None):
     except Exception as e: return False
 
 # ==========================================
-# 🧠 PROCESAMIENTO DE UNA FILA ÚNICA
+# 🧠 PROCESAMIENTO DE UNA FILA ÚNICA (LIGERO & RESILIENTE)
 # ==========================================
 def procesar_prospecto_individual(datos_proceso):
-    # 💡 FIX: Desempaquetamos la nueva variable propuesta_valor
+    """
+    Gestiona el ciclo de vida de un prospecto: 
+    Cualificación -> Datos de Contacto -> Ninja LinkedIn -> Redacción
+    """
+    # Desempaquetamos la configuración de la misión
     index, fila, query_usuario, propuesta_valor = datos_proceso
     
+    # Aseguramos que la fila tenga columnas suficientes para evitar IndexError
     while len(fila) < 11: fila.append("")
     
     try:
+        # 1. FASE DE CUALIFICACIÓN (Si no está cualificado o hubo error previo)
         if fila[2] == "" or "ERROR" in fila[2].upper():
-            # 💡 FIX: Le pasamos la propuesta a la cualificación
             fase_cualificacion(fila, index, query_usuario, propuesta_valor)
+            # Refrescamos los datos de la fila tras actualizar la celda
             fila = sheet.row_values(index) 
         
+        # Si después de auditar, la IA decide que NO encaja, paramos aquí
         if fila[2].upper() != "SI":
             return f"Fin: {fila[0]} (No cualificado)"
 
+        # Asegurar longitud de fila para las siguientes fases
         while len(fila) < 11: fila.append("")
-        if fila[7] == "":
+
+        # 2. BÚSQUEDA DE EMAIL (Si está vacío)
+        if fila[7] == "" or fila[7] is None:
             buscar_email_directivo(fila, index)
             fila = sheet.row_values(index)
             
+        # 3. MODO NINJA LINKEDIN (Si no tiene los [DATOS NINJA] en el resumen)
         while len(fila) < 11: fila.append("")
-        if "[DATOS NINJA" not in fila[3]:
+        if "[DATOS NINJA]" not in str(fila[3]):
             investigar_linkedin_directivo(fila, index)
             fila = sheet.row_values(index)
 
+        # 4. REDACCIÓN DE EMAIL (Si no hay asunto generado)
         while len(fila) < 11: fila.append("")
-        if fila[4] == "":
-            # 💡 FIX: Le pasamos la propuesta a la redacción
+        if fila[4] == "" or fila[4] is None:
             fase_redaccion(fila, index, propuesta_valor)
             fila = sheet.row_values(index)
 
-        return f"Éxito: {fila[0]} procesado."
+        return f"Éxito: {fila[0]} procesado correctamente."
 
     except Exception as e:
         log_web(f"❌ Error procesando {fila[0]}: {e}")
         return f"Error: {fila[0]}"
+
 # ==========================================
-# 🚀 EL NUEVO ORQUESTADOR MULTI-HILO
+# 🚀 EL ORQUESTADOR MULTI-HILO (OPTIMIZADO PARA CLOUD)
 # ==========================================
 def orquestador(query_usuario="empresas", propuesta_valor="Servicios B2B"):
+    """
+    Punto de entrada principal. Lanza la recolección y procesa en paralelo.
+    """
+    # Paso 1: Alimentar el CRM con nuevas empresas reales (DDGS)
     fase_recoleccion(query_usuario)
     
-    log_web("\n--- ⚡ INICIANDO MODO MULTI-HILO (5 a la vez) ---")
+    log_web("\n--- ⚡ INICIANDO PROCESAMIENTO MULTI-HILO ---")
     
+    # Obtenemos todas las filas actualizadas
     filas_brutas = sheet.get_all_values()
     tareas = []
+    
+    # Identificamos filas que necesitan ser procesadas (sin cualificar o cualificadas SI pero sin email/copy)
     for i, f in enumerate(filas_brutas[1:], start=2):
-        # 💡 FIX: Añadimos la propuesta_valor al paquete de tareas
-        tareas.append((i, f, query_usuario, propuesta_valor))
+        # Solo procesamos si:
+        # a) No tiene decisión de cualificación
+        # b) Está cualificado como SI pero le falta el email (col 8) o el asunto (col 5)
+        if len(f) < 3 or f[2] == "" or (f[2].upper() == "SI" and (len(f) < 8 or f[7] == "" or f[4] == "")):
+            tareas.append((i, f, query_usuario, propuesta_valor))
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # Ejecución en paralelo (max_workers=3 para no saturar cuotas de Gemini/Google Sheets)
+    with ThreadPoolExecutor(max_workers=3) as executor:
         resultados = list(executor.map(procesar_prospecto_individual, tareas))
 
-    log_web("\n🎉 ¡PROCESO MULTI-HILO COMPLETADO!")
+    log_web("\n🎉 ¡MISIÓN DE HELIOS COMPLETADA!")
     for res in resultados:
-        print(f"  > {res}")
+        log_web(f"  > {res}")
         
 if __name__ == "__main__":
     orquestador()
