@@ -122,35 +122,33 @@ def extraer_ligero(url):
         return f"Error leyendo web: {e}"
 
 def fase_cualificacion(fila, index, query_usuario, propuesta_valor):
-    """Audita la web y decide si es un cliente ideal (ICP)."""
-    log_web(f"  🔍 Auditando web de {fila[0]}...")
+    log_web(f"  🔍 Auditando {fila[0]}...")
     contexto = extraer_ligero(fila[1])
     
-    # 💡 Le damos a Gemini tanto lo que buscamos como lo que vendemos
-    prompt = f"""Actúa como auditor B2B experto.
+    # 💡 FIX: Instrucciones para que deje pasar a empresas válidas aunque no ponga "ronda" en su web
+    prompt = f"""Analiza esta empresa.
     EMPRESA: {fila[0]}
     WEB: {fila[1]}
-    CONTENIDO EXTRAÍDO: {contexto}
+    TEXTO: {contexto}
     
-    PERFIL BUSCADO: '{query_usuario}'
-    NUESTRA OFERTA: '{propuesta_valor}'
+    PERFIL GENERAL: {query_usuario}
+    NUESTRA OFERTA: {propuesta_valor}
     
-    ¿Es esta empresa un buen cliente potencial para lo que ofrecemos? Responde EXACTAMENTE:
+    INSTRUCCIÓN CRÍTICA: Eres un FILTRO SUAVE. Si la empresa pertenece al sector general descrito (ej. es una startup tecnológica, o es una clínica dental real), califícala como 'SI'. 
+    NO exijas que la web mencione "rondas de inversión", "expansión" o noticias recientes en su portada. 
+    Solo debes calificar con 'NO' si es un directorio, una página rota, una web de otro país (ej. china), o un sector totalmente distinto (ej. software industrial en vez de clínicas).
+
+    Responde EXACTAMENTE:
     CUALIFICADO: [SI/NO]
-    RESUMEN: [Máximo 30 palabras explicando por qué encaja o por qué no]"""
+    RESUMEN: [Máximo 30 palabras indicando su sector principal]"""
     
     try:
         res = llm_flash.invoke([HumanMessage(content=prompt)]).content
         c = "SI" if "CUALIFICADO: SI" in res.upper() else "NO"
-        r = "Sin datos"
-        for l in res.split('\n'):
-            if "RESUMEN:" in l: r = l.split(":")[1].strip()
-            
+        r = res.split("RESUMEN:")[1].strip() if "RESUMEN:" in res else "Sin datos"
         sheet.update_cell(index, 3, c)
         sheet.update_cell(index, 4, r)
-    except Exception as e:
-        log_web(f"    ❌ Error en auditoría: {e}")
-
+    except: pass
 # ==========================================
 # 🎯 FASE 2.5: HUNTER & LINKEDIN
 # ==========================================
