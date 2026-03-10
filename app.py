@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 
 import helios_master 
 
+
+# Justo después de los imports
 def check_password():
     def password_entered():
         if st.session_state["password"] == st.secrets["ACCESS_PASSWORD"]:
@@ -27,24 +29,30 @@ def check_password():
         return True
 
 if not check_password():
-    st.stop()  
+    st.stop()  # Si no hay contraseña, no carga el resto de la web
 
 load_dotenv()
+
 st.set_page_config(page_title="Helios OS", page_icon="☀️", layout="wide")
 
 @st.cache_resource
 def conectar_bd():
     try:
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+        
+        # 💡 FIX: Inteligencia de la nube. Si detecta Secrets, los usa. Si no, usa el archivo local.
         if "gcp_service_account" in st.secrets:
+            # st.secrets devuelve una estructura especial, la convertimos a diccionario normal
             creds_dict = dict(st.secrets["gcp_service_account"])
             creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
         else:
             creds = Credentials.from_service_account_file("credenciales.json", scopes=scopes)
-
-
+            
         cliente = gspread.authorize(creds)
+        
+        # Pillamos el ID del excel desde los Secrets (o desde el .env si estás en tu PC)
         spreadsheet_id = st.secrets.get("SPREADSHEET_ID", os.getenv("SPREADSHEET_ID"))
+        
         return cliente.open_by_key(spreadsheet_id).sheet1
         
     except Exception as e:
@@ -53,14 +61,17 @@ def conectar_bd():
 
 sheet = conectar_bd()
 
+# --- BARRA LATERAL ---
 st.sidebar.title("🎯 Misión de Búsqueda")
 
+# 💡 FIX: Añadimos las dos cajas separadas
 mision_busqueda = st.sidebar.text_input("1. ¿A quién buscamos?", "instaladoras aire acondicionado Murcia")
 propuesta_valor = st.sidebar.text_area("2. ¿Qué les vamos a ofrecer/vender?", "Un software de IA para automatizar la captación de clientes y ahorrar 10h semanales.")
 
 if st.sidebar.button("🚀 Lanzar Orquestador"):
     if sheet:
         with st.spinner(f"Helios trabajando en: {mision_busqueda}..."):
+            # 💡 FIX: Ahora le pasamos LOS DOS textos al orquestador
             helios_master.orquestador(mision_busqueda, propuesta_valor)
             st.cache_resource.clear()
             st.sidebar.success("¡Misión completada!")
@@ -71,6 +82,7 @@ if st.sidebar.button("🚀 Lanzar Orquestador"):
 st.sidebar.divider()
 st.sidebar.info("Modo Human-in-the-loop activado. Los correos NO se enviarán hasta que tú los apruebes.")
 
+# --- VISOR DE LOGS (CONSOLA) ---
 st.sidebar.divider()
 st.sidebar.subheader("📜 Actividad en vivo")
 if os.path.exists("helios.log"):
@@ -78,11 +90,14 @@ if os.path.exists("helios.log"):
         lineas = f.readlines()
         st.sidebar.code("".join(lineas[-20:]), language="text")
 
+# --- CUERPO PRINCIPAL ---
 st.title("☀️ Helios OS | Centro de Mando B2B")
 
 if sheet:
     try:
+        # LECTURA SEGURA
         datos_crudos = sheet.get_all_values()
+        
         if len(datos_crudos) > 1:
             cabeceras = datos_crudos[0]
             filas = datos_crudos[1:]
@@ -114,6 +129,7 @@ if sheet:
             
             row = df[df['Nombre'] == empresa_seleccionada].iloc[0]
             
+            # Sin columnas de arte, todo a ancho completo
             st.markdown(f"### {empresa_seleccionada}")
             st.write(f"🌐 **Web:** {row['Web']}")
             st.write(f"📧 **Contacto:** {row['Email Contacto']}")
@@ -147,6 +163,7 @@ if sheet:
             else:
                 st.success("✅ Este correo ya fue enviado en pruebas anteriores. ¡Selecciona otra empresa!")
 
+            # --- MÓDULO LINKEDIN PRO ---
             st.write("") 
             st.subheader("🥷 Conexión en LinkedIn")
             
@@ -173,6 +190,7 @@ if sheet:
             else:
                 st.warning("El Ninja no encontró a un directivo claro o falta generar el mensaje.")
 
+            # Botón de Descarte suave
             st.divider()
             if st.button(f"🗑️ Descartar a {empresa_seleccionada}", help="Marca como NO cualificado para quitarlo de tu vista"):
                 filas = sheet.get_all_values()
