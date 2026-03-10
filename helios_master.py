@@ -121,25 +121,23 @@ def fase_recoleccion(query_usuario):
     except Exception as e:
         log_web(f"❌ Error insertando en Google Sheets: {e}")
         
+# ==========================================
+# 🕵️ FASE NOTICIAS (EL STALKER)
+# ==========================================
 def fase_noticias(nombre_empresa):
-    """
-    Busca hitos, noticias o expansiones recientes de la empresa.
-    """
-    log_web(f"  🕵️ Investigando actualidad de {nombre_empresa}...")
-    contexto_noticias = ""
+    log_web(f"  🕵️ Stalkeando actualidad de {nombre_empresa}...")
+    texto_noticias = ""
     try:
         with DDGS() as ddgs:
-            # Buscamos noticias, inversiones o aperturas
-            query_news = f'"{nombre_empresa}" noticia expansión apertura inversión 2024 2025'
-            res = list(ddgs.text(query_news, max_results=3))
-            
+            # Buscamos hitos recientes en España
+            query = f'"{nombre_empresa}" noticia expansion contrato 2025'
+            res = list(ddgs.text(query, region='es-es', max_results=3))
             for r in res:
-                contexto_noticias += f"- {r['title']}: {r['body']}\n"
-        
-        return contexto_noticias if contexto_noticias else "Sin noticias recientes destacadas."
-    except Exception as e:
-        log_web(f"    ⚠️ Error buscando noticias: {e}")
-        return "Sin noticias recientes."
+                texto_noticias += f"- {r['title']}: {r['body']}\n"
+        return texto_noticias if texto_noticias else "Sin noticias recientes destacadas."
+    except:
+        return "No se pudieron obtener noticias."
+
 
 # ==========================================
 # 🔬 FASE 2: CUALIFICACIÓN (BS4 + Requests)
@@ -375,35 +373,41 @@ def enviar_correo_manual(nombre_empresa, nuevo_asunto=None, nuevo_cuerpo=None):
 # ==========================================
 def procesar_prospecto_individual(datos_proceso):
     index, fila, query_usuario, propuesta_valor = datos_proceso
-    while len(fila) < 12: fila.append("") # 💡 Subimos a 12 columnas para la nueva info
+    while len(fila) < 12: fila.append("") 
     
     try:
-        # 1. CUALIFICACIÓN (Ya la tenemos)
+        # 1. CUALIFICACIÓN
         if fila[2] == "" or "ERROR" in str(fila[2]).upper():
             fase_cualificacion(fila, index, query_usuario, propuesta_valor)
             fila = sheet.row_values(index) 
         
         if str(fila[2]).upper() != "SI":
-            return f"Fin: {fila[0]} (No cualificado)"
+            return f"Descartado: {fila[0]}"
 
-        # 2. 🕵️ NUEVO: INVESTIGACIÓN DE ACTUALIDAD (Punto 1)
-        # Solo lo hacemos si la columna de noticias (columna 12) está vacía
+        # 2. EL STALKER (Noticias en columna 12 / L)
+        while len(fila) < 12: fila.append("")
         if not fila[11] or fila[11] == "":
             noticias = fase_noticias(fila[0])
             sheet.update_cell(index, 12, noticias)
-            fila[11] = noticias # Lo guardamos en memoria para la redacción
+            fila[11] = noticias
 
-        # 3. EMAIL & LINKEDIN (Ya los tenemos)
-        if not fila[7]: buscar_email_directivo(fila, index); fila = sheet.row_values(index)
-        if "[DATOS NINJA]" not in str(fila[3]): investigar_linkedin_directivo(fila, index); fila = sheet.row_values(index)
+        # 3. EMAIL (Hunter)
+        if not fila[7]:
+            buscar_email_directivo(fila, index)
+            fila = sheet.row_values(index)
+            
+        # 4. NINJA (LinkedIn)
+        if "[DATOS NINJA]" not in str(fila[3]):
+            investigar_linkedin_directivo(fila, index)
+            fila = sheet.row_values(index)
 
-        # 4. REDACCIÓN PERSONALIZADA (Modificada abajo)
-        if not fila[4]: 
+        # 5. REDACCIÓN PERSONALIZADA (Usa las noticias de la col 12)
+        if not fila[4]:
             fase_redaccion(fila, index, propuesta_valor)
 
-        return f"Éxito: {fila[0]} stalkeado y procesado."
+        return f"✅ {fila[0]} completado con éxito."
     except Exception as e:
-        return f"Error: {e}"
+        return f"❌ Error en {fila[0]}: {e}"
         
 # ==========================================
 # 🚀 EL ORQUESTADOR HELIOS (POTENCIA MÁXIMA)
